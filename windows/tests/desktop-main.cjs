@@ -5,7 +5,7 @@ const path = require('node:path');
 module.exports = async function ({ app, win, dialog, snapshot, runAction, openFile, setConnection, connectionFile, protection }) {
   const root = path.resolve('work/desktop-test');
   const errors = [], checks = [];
-  win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
+  win.webContents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
   win.webContents.on('preload-error', (_event, _file, error) => errors.push(error.message));
   const js = code => win.webContents.executeJavaScript(code, true);
   const waitFor = async (code, label) => {
@@ -18,8 +18,10 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     await new Promise(resolve => setTimeout(resolve, 600));
     win.focus(); win.webContents.focus();
     await js("document.querySelector('.cm-content').focus()");
-    win.webContents.send('editor:command', 'select-all');
-    await waitFor("window.getSelection().toString().length > 0", 'select-all command');
+    if (snapshot().text.length) {
+      win.webContents.send('editor:command', 'select-all');
+      await waitFor("window.getSelection().toString().length > 0", 'select-all command');
+    }
     await win.webContents.insertText(text);
     await waitFor(`document.querySelector('.cm-content').textContent.includes(${JSON.stringify(text.split('\n').find(Boolean))})`, 'editor insertion');
     await waitFor("document.getElementById('save-state').textContent === 'Unsaved changes'", 'document sync');
@@ -235,8 +237,38 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     assert.match(errors.pop(), /different filename/);
     check('backups retain exact bytes and restore as protected unsaved copies');
     answer = 1; await runAction('new');
+    const formatSource = 'INT. FORMAT ROOM - DAY\n\n!😀 **Bold** *italic* _underlined_ ***both*** [[secret]] /* omitted */\n\n@Jane\nHello.\nMore.\n\n@John ^\n(replying)\nYes.\n\n!<img src=x onerror=alert(1)>\n';
+    await edit(formatSource);
+    await waitFor("document.querySelector('.cm-content .inline-bold') && document.querySelector('.cm-content .inline-italic') && document.querySelector('.cm-content .inline-underline')", 'source emphasis marks');
+    assert.equal(snapshot().text, formatSource);
+    await js("document.getElementById('preview').click()");
+    assert.equal(await js("document.getElementById('editor').hidden && !document.getElementById('preview-pane').hidden && document.getElementById('preview').getAttribute('aria-pressed') === 'true'"), true);
+    assert.equal(await js("document.querySelectorAll('#preview-content .dual-dialogue .dual-column').length"), 2);
+    assert.equal(await js("document.querySelector('#preview-content .dual-left').textContent.trim()"), 'JaneHello.More.');
+    assert.equal(await js("Array.from(document.querySelectorAll('#preview-content .dual-right .preview-line')).map(line=>line.textContent.trim()).join('')"), 'John(replying)Yes.');
+    assert.equal(await js("getComputedStyle(document.querySelector('.dual-dialogue')).display"), 'grid');
+    assert.equal(await js("document.querySelectorAll('#preview-content img').length"), 0);
+    const previewText = await js("document.getElementById('preview-content').textContent");
+    assert.ok(previewText.includes('<img src=x onerror=alert(1)>'));
+    assert.ok(!previewText.includes('secret') && !previewText.includes('omitted'));
+    assert.ok(!previewText.includes('**') && !previewText.includes('@Jane'));
+    assert.equal(snapshot().text, formatSource);
+    check('live emphasis and simultaneous-dialogue preview preserve exact source and render markup safely');
+    await remote('replace', { ...guard(), find: 'Hello.', replace: 'Good evening.', expectedOccurrences: 1 });
+    await waitFor("document.querySelector('#preview-content .dual-left').textContent.includes('Good evening.')", 'preview updates after automation');
+    await js("document.getElementById('preview').click()");
+    await remote('undo', guard()); assert.equal(snapshot().text, formatSource);
+    await js("document.getElementById('preview').click()");
+    await waitFor("document.querySelector('.outline-item.scene')?.textContent.includes('FORMAT ROOM')", 'current outline after undo');
+    await js("document.querySelector('.outline-item.scene').click()");
+    assert.equal(await js("document.getElementById('preview-pane').hidden && !document.getElementById('editor').hidden"), true);
+    check('preview updates after guarded Codex edits; undo and outline navigation return to source editing');
+    await js("document.getElementById('preview').click()");
+    await fs.writeFile(path.join(root, 'desktop-preview.png'), (await win.capturePage()).toPNG());
+    await js("document.getElementById('preview').click()");
+    answer = 1; await runAction('new');
     assert.deepEqual(errors, []);
-    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.3.0', passed: checks.length, checks, errors }, null, 2));
+    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.4.0', passed: checks.length, checks, errors }, null, 2));
     console.log(`DESKTOP TESTS PASSED: ${checks.length}`);
     await setConnection(false); app.exit(0);
   } catch (error) {

@@ -2,6 +2,7 @@ import { EditorState, Compartment, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWithTab, isolateHistory } from '@codemirror/commands';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
+import { renderPreview } from './preview';
 import { parseFountain, type ParsedScript } from './fountain';
 import { AutomationError, checkPosition, validateEdits, type TextEdit } from './automation';
 interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; protection: string; }
@@ -25,6 +26,7 @@ let current: DocumentState;
 let parsed: ParsedScript = parseFountain('');
 let loading = false;
 let focusMode = false;
+let previewMode = false;
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
 let sync: Promise<unknown> = Promise.resolve();
 let editorRevision = 0;
@@ -34,7 +36,12 @@ const formatter = ViewPlugin.fromClass(class {
   update(update: ViewUpdate) { if (update.docChanged) this.decorations = this.make(update.view); }
   make(view: EditorView) {
     parsed = parseFountain(view.state.doc.toString());
-    return Decoration.set(parsed.lines.filter(line => line.type !== 'empty').map(line => Decoration.line({ attributes: { class: `element-${line.type}` } }).range(line.from)));
+    const ranges = parsed.lines.flatMap(line => [
+      ...(line.type !== 'empty' ? [Decoration.line({ attributes: { class: `element-${line.type}${line.dualSide ? ` dual-source-${line.dualSide}` : ''}` } }).range(line.from)] : []),
+      ...line.inline.filter(range => range.to > range.from).map(range => Decoration.mark({ class: `inline-${range.style}` }).range(range.from, range.to))
+    ]);
+    if (previewMode) renderPreview(parsed, $('preview-content'));
+    return Decoration.set(ranges, true);
   }
 }, { decorations: value => value.decorations });
 
@@ -71,11 +78,12 @@ function applyDocument(doc: DocumentState) {
     })
   ] });
   view.setState(state); loading = false;
+  if (previewMode) setPreview(true);
   $<HTMLInputElement>('outline-filter').value = '';
   $('metadata-banner').hidden = !doc.readOnly;
   $('mode-label').textContent = doc.readOnly ? 'BEAT metadata protected · read-only' : 'Fountain · live formatting';
   $('file-mode').textContent = doc.readOnly ? 'PROTECTED DOCUMENT' : 'LOCAL DOCUMENT';
-  setStatus(doc); renderOutline(); updateCursor(); view.focus();
+  setStatus(doc); renderOutline(); updateCursor(); if (!previewMode) view.focus();
 }
 function setStatus(doc: DocumentState) {
   if (current && doc.id !== current.id) return;
@@ -103,7 +111,7 @@ function renderOutline() {
     const label = document.createElement('span'); label.className = 'scene-title'; label.textContent = item.title;
     if (item.synopsis) { const synopsis = document.createElement('span'); synopsis.className = 'synopsis'; synopsis.textContent = item.synopsis; label.append(synopsis); }
     button.append(label);
-    button.addEventListener('click', () => { view.dispatch({ selection: { anchor: item.from }, effects: EditorView.scrollIntoView(item.from, { y: 'center' }) }); view.focus(); });
+    button.addEventListener('click', () => { if (previewMode) setPreview(false); view.dispatch({ selection: { anchor: item.from }, effects: EditorView.scrollIntoView(item.from, { y: 'center' }) }); view.focus(); });
     container.append(button);
   }
   if (!container.childElementCount) { const empty = document.createElement('p'); empty.className = 'outline-empty'; empty.textContent = query ? 'No matching scenes.' : 'Your outline grows as you write. Start a scene with INT. or EXT., or add a section with #.'; container.append(empty); }
@@ -116,7 +124,19 @@ function updateCursor() {
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));
 }
+function setPreview(enabled: boolean) {
+  clearTimeout(outlineTimer);
+  renderOutline();
+  previewMode = enabled;
+  $('preview').setAttribute('aria-pressed', String(enabled));
+  $('preview-pane').hidden = !enabled;
+  $('editor').hidden = enabled;
+  if (enabled) { renderPreview(parsed, $('preview-content')); $('preview-pane').focus(); }
+  else view.focus();
+}
 function command(action: string) {
+  if (action === 'preview') { setPreview(!previewMode); return; }
+  if (previewMode && ['select-all', 'find', 'undo', 'redo'].includes(action)) setPreview(false);
   if (action === 'select-all') { selectAll(view); view.focus(); }
   if (action === 'find') openSearchPanel(view);
   if (action === 'undo') undo(view);
@@ -125,7 +145,7 @@ function command(action: string) {
   if (action === 'theme') { const light = document.body.classList.toggle('light'); $('theme').textContent = light ? 'Dark' : 'Light'; localStorage.setItem('beat-theme', light ? 'light' : 'dark'); }
 }
 for (const action of ['new', 'open', 'save', 'editable-copy']) $(action).addEventListener('click', async () => { await sync; await window.beat.action(action); });
-for (const action of ['find', 'focus', 'theme']) $(action).addEventListener('click', () => command(action));
+for (const action of ['find', 'focus', 'theme', 'preview']) $(action).addEventListener('click', () => command(action));
 $('outline-filter').addEventListener('input', renderOutline);
 window.beat.onDocument(applyDocument);
 window.beat.onStatus(setStatus);
@@ -158,6 +178,7 @@ window.beat.onAutomation(async request => {
     } else if (request.command === 'select') {
       checkPosition(text, request.params.from); checkPosition(text, request.params.to);
       if (request.params.to < request.params.from) throw new AutomationError('INVALID_RANGE', 'Selection end precedes its start.');
+      if (previewMode) setPreview(false);
       view.dispatch({ selection: { anchor: request.params.from, head: request.params.to }, effects: EditorView.scrollIntoView(request.params.from, { y: 'center' }) });
       view.focus();
     } else if (request.command === 'undo') changed = undo(view);

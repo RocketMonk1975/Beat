@@ -12,7 +12,7 @@
     <div class="brand"><span class="brand-mark">(beat)</span><span class="platform">WINDOWS <b>PREVIEW</b></span></div>
     <div class="file-actions"><button id="new" title="New · Ctrl+N">New</button><button id="open" title="Open · Ctrl+O">Open</button><button id="save" class="primary" title="Save · Ctrl+S">Save</button></div>
     <div class="document-name"><span id="filename">Untitled.fountain</span><span id="save-state">Ready</span><span id="protection-state" role="status" aria-live="polite">Automatic recovery ready</span></div>
-    <div class="view-actions"><button id="find" title="Find / Replace · Ctrl+F">Find</button><button id="focus" title="Focus mode · Ctrl+Shift+F" aria-pressed="false">Focus</button><button id="theme" title="Toggle light / dark theme" aria-label="Toggle theme">Light</button></div>
+    <div class="view-actions"><button id="preview" title="Continuous screenplay preview · Ctrl+Shift+P" aria-pressed="false" aria-controls="preview-pane">Preview</button><button id="find" title="Find / Replace · Ctrl+F">Find</button><button id="focus" title="Focus mode · Ctrl+Shift+F" aria-pressed="false">Focus</button><button id="theme" title="Toggle light / dark theme" aria-label="Toggle theme">Light</button></div>
   </header>
   <div id="metadata-banner" role="status" hidden><span>This BEAT document is read-only while revision and tag support is being ported.</span><button id="editable-copy">Create editable copy</button></div>
   <main class="workspace">
@@ -26,6 +26,7 @@
     <section class="writing-workspace" aria-label="Writing workspace">
       <div class="writing-heading"><span>SCREENPLAY</span><span id="mode-label">Fountain · live formatting</span></div>
       <div id="editor"></div>
+      <section id="preview-pane" tabindex="0" aria-label="Continuous screenplay preview" hidden><p class="preview-help">Continuous preview · Preview or Ctrl+Shift+P returns to editing.</p><div id="preview-content"></div></section>
     </section>
   </main>
   <footer class="statusbar"><span><span class="status-dot"></span><span id="file-mode">LOCAL DOCUMENT</span></span><span id="stats">0 words</span><button id="codex-connection" aria-pressed="false">Codex starting…</button><span id="cursor">Line 1 · Action</span><span class="shortcut-hint">Ctrl+S save · Ctrl+F find</span></footer>

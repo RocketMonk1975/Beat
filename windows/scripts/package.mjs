@@ -2,7 +2,7 @@ import { packager } from '@electron/packager';
 import { mkdir, copyFile, writeFile } from 'node:fs/promises';
 await mkdir('work', { recursive: true });
 const paths = await packager({
-  dir: '.', out: 'release/0.3.0', name: 'BEAT Windows', platform: 'win32', arch: 'x64',
+  dir: '.', out: 'release/0.4.0', name: 'BEAT Windows', platform: 'win32', arch: 'x64',
   overwrite: true, asar: true, prune: false,
   ignore: [/^\/src($|\/)/, /^\/tests($|\/)/, /^\/scripts($|\/)/, /^\/automation($|\/)/, /^\/work($|\/)/, /^\/release($|\/)/, /^\/node_modules($|\/)/, /tsconfig\.json$/, /\.map$/],
   tmpdir: `${process.cwd()}/work/package-temp`,
@@ -11,6 +11,7 @@ const paths = await packager({
 for (const folder of paths) {
   await copyFile('../LICENSE.md', `${folder}/BEAT-LICENSE.md`);
   await copyFile('README.md', `${folder}/START-HERE.md`);
+  await copyFile('PARSER-PARITY.md', `${folder}/PARSER-PARITY.md`);
   await copyFile('CONNECTION.md', `${folder}/CODEX-CONNECTION.md`);
   await copyFile('COPYING', `${folder}/COPYING`);
   await copyFile('dist/THIRD-PARTY-NOTICES.txt', `${folder}/THIRD-PARTY-NOTICES.txt`);

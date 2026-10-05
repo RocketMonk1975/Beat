@@ -1,6 +1,6 @@
 # BEAT Windows preview
 
-Version 0.2.0 adds a local Codex connection. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+Version 0.4.0 improves Fountain parsing and adds formatted screenplay preview. Recovery and backups are included from 0.3.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
 
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
@@ -35,7 +35,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Markup is visible. Full inline emphasis, complex inline/multiline notes, true dual-dialogue layout, autocomplete, scene reordering, pagination, PDF/FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Autocomplete, scene reordering, pagination, PDF/FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -51,3 +51,12 @@ Startup offers unresolved drafts. File > Recover unsaved screenplay opens the pa
 File > Restore versioned backup lists previous versions by original filename and timestamp. Each overwrite first backs up exact existing bytes, including BOM, mixed newlines and metadata. Backup failures stop the save. Restored backups are protected unsaved copies. Destinations are checked immediately before atomic replacement. Avoid editing the same file in another application during a save: filesystem replacement is not a cross-application transaction.
 
 Storage is under user-data in protection/recovery and protection/backups. Each instance owns a separate session; another active instance's drafts are excluded from recovery selection. Damaged entries are retained independently and reported. Backups retain the newest 50 versions per original path. Unresolved drafts are never aged out; a warning beyond 100 entries asks users to resolve them explicitly. This favors preserving work over a hard recovery storage limit.
+
+
+### Fountain formatting (0.4.0)
+
+The Windows parser now uses blank-line context for headings and cues, accepts mixed-case cue extensions and unfinished parentheticals, supports shots (`!!`), fullwidth forced markers, and title-page continuation. Inline and multiline comments no longer consume visible text around them. Notes must close before a blank line; omissions may extend to the end of the script. Outline labels and word counts exclude comment contents and matched formatting markers.
+
+The editor styles bold, italic, underline and combined/nested emphasis while keeping every source character editable. Escaped markers and incomplete markup stay literal. Preview (View > Screenplay preview, Ctrl+Shift+P) displays continuous formatted text, omits comments and control markers, and places paired `^` dialogue blocks in two columns. Returning to editing keeps selection and undo history. The preview updates after local Codex edits; outline navigation returns to the source editor.
+
+This is a static-rule parity pass based on the native parser source checked into this repository, not a claim of complete parity with the running macOS app. See PARSER-PARITY.md for the comparison and remaining differences. The preview has no pagination or PDF export yet.

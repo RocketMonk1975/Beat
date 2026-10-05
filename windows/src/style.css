@@ -78,3 +78,33 @@ body.focus-mode .outline-panel { display:none; }
 body.focus-mode .writing-heading { visibility:hidden; }
 body.focus-mode .file-actions,body.focus-mode .brand { opacity:.45; }
 @media(max-width:1050px) { .outline-panel { width:230px; } .cm-content { padding:42px 40px 100px!important; } .toolbar { gap:12px; padding:0 18px; } .shortcut-hint { display:none; } }
+
+#protection-state { font-size:10px; color:var(--muted); }
+.inline-bold { font-weight:bold; }
+.inline-italic { font-style:italic; }
+.inline-underline { text-decoration:underline; }
+.inline-note { color:var(--muted); font-style:italic; }
+.inline-boneyard { color:var(--muted); opacity:.65; }
+.inline-marker,.inline-escape { color:var(--muted); }
+.cm-line.element-shot { font-weight:bold; text-transform:uppercase; }
+.cm-line.dual-source-left,.cm-line.dual-source-right { border-left:2px solid var(--accent); }
+#editor[hidden],#preview-pane[hidden] { display:none; }
+#preview-pane { flex:1; min-height:0; overflow:auto; padding:6px 28px 45px; }
+.preview-help { font-size:11px; color:var(--muted); text-align:center; margin:0 0 18px; }
+#preview-content { width:760px; max-width:100%; min-height:100%; margin:auto; padding:62px 72px 130px; background:var(--paper); box-shadow:var(--page-shadow); font:16px/1.65 'Screenplay','Courier New',monospace; }
+.preview-line { white-space:pre-wrap; overflow-wrap:anywhere; min-height:1.65em; }
+.preview-line.element-character { padding-left:38%; text-transform:uppercase; }
+.preview-line.element-dialogue { padding-left:20%; padding-right:18%; }
+.preview-line.element-parenthetical { padding-left:28%; padding-right:20%; }
+.preview-line.element-scene,.preview-line.element-shot { font-weight:bold; text-transform:uppercase; }
+.preview-line.element-transition { text-align:right; }
+.preview-line.element-centered { text-align:center; }
+.preview-line.element-title { color:var(--muted); }
+.preview-line.element-lyrics { font-style:italic; }
+.preview-line.element-page-break { color:var(--muted); text-align:center; border-top:1px dashed var(--line); margin:1em 0; }
+.dual-dialogue { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:2em; }
+.dual-column { min-width:0; }
+.dual-column .element-character { padding-left:12%; }
+.dual-column .element-dialogue { padding-left:0; padding-right:0; }
+.dual-column .element-parenthetical { padding-left:5%; padding-right:5%; }
+@media(max-width:1050px) { #preview-content { padding:42px 40px 100px; } .dual-dialogue { gap:1em; } }
