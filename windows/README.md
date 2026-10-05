@@ -1,6 +1,6 @@
 # BEAT Windows preview
 
-Version 0.5.0 adds paginated preview and PDF export, building on the Fountain formatting improvements in 0.4.0. Recovery and backups are included from 0.3.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+Version 0.8.0 adds revision tracking, following Final Draft exchange in 0.7.0, writing tools in 0.6.0 and paginated PDF export in 0.5.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
 
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
@@ -31,11 +31,11 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 - Undo/redo, find/replace, dark/light themes and focus mode.
 - Local Codex control: read, search, navigate, apply undoable edits, undo/redo and save a named script. Pause the connection from the footer.
 - Unsaved-change prompts and detection of externally changed files before overwriting.
-- Existing BEAT metadata documents open read-only and round-trip intact. File > Create editable copy creates a new Fountain-only document; the copy omits BEAT metadata and must be saved under another filename.
+- Revision-only BEAT documents using the supported legacy settings envelope are editable. Other BEAT metadata documents open read-only and round-trip intact. File > Create editable copy creates a new Fountain-only document; the copy omits BEAT metadata and must be saved under another filename.
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Tags and plugin compatibility are not implemented. Revision tracking is limited to additions and suggested removals. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -87,3 +87,11 @@ The converter supports scene headings and numbers, action, character cues, dialo
 XML is parsed locally with DTD/entity declarations disabled, strict error reporting and bounded size/depth. Exports escape XML text and validate text characters. Existing destinations are checked before atomic replacement; edits made while an export dialog is open cancel export rather than writing stale text.
 
 Validation covers the repository's native FDX structure and Windows round trips. Opening these exports in an installed Final Draft application remains an external interoperability check; no complete fidelity with Final Draft's production metadata or print layout is claimed.
+
+### Revision tracking (0.8.0)
+
+Enable **Track additions** above the editor and choose one of the eight native revision generations. New typing and Codex insertions are underlined in that generation's color. Select text and use **Mark addition**, **Suggest removal**, or **Clear marks**. Suggested removals remain in the source and appear struck through. Ordinary Delete/Backspace still erases text; it does not archive deleted text or create a removal suggestion automatically.
+
+Text edits, marks, generation and tracking-mode changes share undo/redo. Revisions persist in automatic recovery and in Fountain saves using BEAT's native UTF-16 revision arrays. BOM and source newline style are preserved; native CRLF range offsets are translated to and from the editor's LF offsets. Untouched files still save byte-for-byte.
+
+This first implementation edits only plain Fountain and supported revision-only legacy BEAT settings. Documents containing tags, reviews, heading UUIDs, plugin data, unknown settings, malformed ranges or obsolete removed ranges stay protected. Modern settings envelopes are also protected. Create an editable copy to omit those settings. Scene moves are disabled while tracking is enabled or marks are present. PDF/preview show screenplay content without revision marks; FDX export warns that revision metadata is omitted. Native macOS rendering parity has not yet been verified.

@@ -130,3 +130,9 @@ button:disabled { opacity:.4; cursor:default; }
 #character-suggestions[hidden] { display:none; }
 #character-suggestions button { font-size:12px; }
 #character-suggestions [aria-selected=true] { background:var(--hover); color:var(--accent); outline:1px solid var(--accent); }
+
+.revision-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px 16px; font-size:12px; }
+#revision-summary { flex-basis:100%; opacity:.75; }
+.revision-Addition { text-decoration: underline; text-decoration-thickness:2px; text-decoration-color:var(--revision-color); }
+.revision-RemovalSuggestion { text-decoration:line-through; text-decoration-color:var(--revision-color); background:color-mix(in srgb, var(--revision-color) 15%, transparent); }
+.revision-generation-0 { --revision-color:#5b9dff; }.revision-generation-1 { --revision-color:#f083c6; }.revision-generation-2 { --revision-color:#c7a800; }.revision-generation-3 { --revision-color:#39b878; }.revision-generation-4 { --revision-color:#d69f30; }.revision-generation-5 { --revision-color:#b89b76; }.revision-generation-6 { --revision-color:#df7890; }.revision-generation-7 { --revision-color:#d8475f; }

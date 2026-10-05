@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { decodeDocument, encodeDocument } = require('../dist/document.cjs');
+const { decodeDocument, encodeDocument, validateRevisions } = require('../dist/document.cjs');
 const { createProtection, atomicWrite } = require('./protection.cjs');
 const { importFDX, exportFDX } = require('../dist/fdx.cjs');
 const { printHTML } = require('../dist/pagination.cjs');
@@ -21,10 +21,10 @@ const connectionFile = process.env.BEAT_BRIDGE_FILE ?? (app.isPackaged ? path.jo
 const welcome = 'Title: A new story\nAuthor: Your name\n\n# Act One\n\nINT. WRITING ROOM - DAY\n\nA blank page. A little courage. The beginning of something.\n\nWRITER\nEvery story starts somewhere.\n\nEXT. CITY STREET - EVENING\n\nThe world keeps moving.\n';
 function createDocument(text = '', filePath = null) {
   const model = decodeDocument(text);
-  return { id: randomUUID(), revision: 0, filePath, model, text: model.text, dirty: false, forceUnsaved: false,
+  return { id: randomUUID(), revision: 0, filePath, model, text: model.text, revisions: model.revisions, dirty: false, forceUnsaved: false,
     protectedPaths: new Set(), metadataPaths: new Set(model.metadata !== null && filePath ? [path.resolve(filePath).toLowerCase()] : []) };
 }
-function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : doc.displayName ? doc.displayName : doc.recoveryName ? `Recovered — ${doc.recoveryName}` : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null, protection: protectionMessage }; }
+function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : doc.displayName ? doc.displayName : doc.recoveryName ? `Recovered — ${doc.recoveryName}` : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: !doc.model.revisionEditable, revisions: doc.revisions, protection: protectionMessage }; }
 function status() {
   const state = snapshot();
   win.setTitle(`${state.dirty ? '• ' : ''}${state.name} — BEAT Windows`);
@@ -38,10 +38,13 @@ function applyUpdate(update) {
   if (update?.id !== doc.id || typeof update.text !== 'string') return false;
   if (!Number.isInteger(update.revision) || update.revision < 0) return false;
   if (update.text.length > 20 * 1024 * 1024) throw new Error('Document exceeds the 20 MB prototype limit.');
-  if (doc.model.metadata !== null && update.text !== doc.model.text) return false;
+  const revisions = update.revisions ?? doc.revisions;
+  if (!validateRevisions(revisions, update.text)) return false;
+  const changedRevisions = JSON.stringify(revisions) !== JSON.stringify(doc.revisions);
+  if (!doc.model.revisionEditable && (update.text !== doc.model.text || changedRevisions)) return false;
   if (update.revision < doc.revision) return true;
-  if (update.revision === doc.revision && update.text !== doc.text) return false;
-  doc.text = update.text; doc.revision = update.revision; doc.dirty = doc.text !== doc.model.text || doc.forceUnsaved; protection.schedule(doc); status(); return true;
+  if (update.revision === doc.revision && (update.text !== doc.text || changedRevisions)) return false;
+  doc.text = update.text; doc.revisions = revisions; doc.revision = update.revision; doc.dirty = doc.text !== doc.model.text || JSON.stringify(revisions) !== JSON.stringify(doc.model.revisions) || doc.forceUnsaved; protection.schedule(doc); status(); return true;
 }
 function connectionStatus() { return { enabled: bridge !== null, lastAction: lastAutomation, error: connectionError }; }
 function publishConnection() { if (win && !win.isDestroyed()) win.webContents.send('automation:status', connectionStatus()); }
@@ -125,7 +128,7 @@ async function save(saveAs = false) {
     if (!path.extname(target)) target += '.fountain';
   }
   if (path.extname(target).toLowerCase() === '.fdx') throw new Error('Save the script as Fountain; use File > Export Final Draft for FDX.');
-  const content = encodeDocument(doc.model, doc.text);
+  const content = encodeDocument(doc.model, doc.text, doc.revisions);
   if (doc.protectedPaths.has(path.resolve(target).toLowerCase())) {
     throw new Error('Save the editable copy under a different filename to preserve the original BEAT document.');
   }
@@ -210,7 +213,7 @@ async function conversionWarning(title, warnings) {
 }
 async function exportFinalDraft() {
   const state = snapshot(), converted = exportFDX(state.text);
-  if (doc.model.metadata !== null) converted.warnings.push('BEAT settings, tags and revision metadata are not exported.');
+  if (doc.model.metadata !== null || doc.revisions.ranges.length) converted.warnings.push('BEAT settings, tags and revision metadata are not exported.');
   if (!await conversionWarning('Export Final Draft', converted.warnings)) return false;
   const result = await dialog.showSaveDialog(win, { title: 'Export Final Draft screenplay', defaultPath: state.name.replace(/\.(fountain|txt|fdx)$/i, '') + '.fdx', filters: [{ name: 'Final Draft screenplay', extensions: ['fdx'] }] });
   if (result.canceled || !result.filePath) return false;
@@ -266,7 +269,10 @@ async function recover() {
   const record = entry.record;
   const restored = createDocument(record.original);
   restored.recoveryName = record.name ?? (record.sourcePath ? path.basename(record.sourcePath) : 'Untitled.fountain');
-  if (restored.model.metadata !== null && record.text !== restored.model.text) throw new Error('Recovery text conflicts with protected BEAT metadata. The draft was retained for inspection.');
+  if (!restored.model.revisionEditable && record.text !== restored.model.text) throw new Error('Recovery text conflicts with protected BEAT metadata. The draft was retained for inspection.');
+  const restoredRevisions = record.revisions ?? restored.model.revisions;
+  if (!validateRevisions(restoredRevisions, record.text) || !restored.model.revisionEditable && JSON.stringify(restoredRevisions) !== JSON.stringify(restored.model.revisions)) throw new Error('Invalid protected revision recovery state. The draft was retained.');
+  restored.revisions = restoredRevisions;
   restored.text = record.text; restored.recoverySource = entry.key;
   restored.protectedPaths = new Set([...record.protectedPaths, ...(record.sourcePath ? [path.resolve(record.sourcePath).toLowerCase()] : [])]);
   restored.forceUnsaved = restored.dirty = true;
@@ -296,7 +302,7 @@ app.whenReady().then(async () => {
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Screenplay preview', accelerator: 'Ctrl+Shift+P', click: () => command('preview') }, { label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.7.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revisions and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.8.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revision additions and suggested removals are available. Tags and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {

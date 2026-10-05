@@ -16,6 +16,17 @@ test('recovery survives a fresh process store without writing the source file', 
   assert.equal(records.length, 1); assert.equal(records[0].record.text, document.text); assert.equal(records[0].record.original, 'original');
   assert.deepEqual(records[0].record.protectedPaths, [document.filePath]); assert.equal(await fs.readFile(document.filePath, 'utf8'), 'original');
 });
+
+test('revision-only edits survive a fresh recovery store with unchanged source text', async t => {
+  const root = await fs.mkdtemp(path.resolve('work/revision-recovery-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = createProtection(root), document = doc('original');
+  document.revisions = { enabled: true, generation: 3, ranges: [{ from: 0, to: 4, kind: 'RemovalSuggestion', generation: 2 }] };
+  store.schedule(document); await store.flush();
+  const records = (await createProtection(root).list()).records;
+  assert.equal(records[0].record.text, records[0].record.original);
+  assert.deepEqual(records[0].record.revisions, document.revisions);
+});
 test('debouncing stores the last edit and maximum wait checkpoints continuous edits', async t => {
   const store = await setup(t, { debounceMs: 80, maxWaitMs: 35 }), document = doc();
   for (let i = 0; i < 6; i++) { document.text = String(i); store.schedule(document); await new Promise(r => setTimeout(r, 10)); }

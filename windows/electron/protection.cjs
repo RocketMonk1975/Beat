@@ -45,7 +45,7 @@ function createProtection(root, { sessionId = randomUUID(), onError = () => {}, 
   }
   function schedule(doc) {
     const record = validate({ version: 1, id: doc.id, updatedAt: Date.now(), sourcePath: doc.filePath,
-      original: doc.model.original, text: doc.text, protectedPaths: [...doc.protectedPaths], recoveredFrom: doc.recoverySource ?? null, name: doc.recoveryName ?? (doc.filePath ? path.basename(doc.filePath) : 'Untitled.fountain') });
+      original: doc.model.original, text: doc.text, revisions: doc.revisions, protectedPaths: [...doc.protectedPaths], recoveredFrom: doc.recoverySource ?? null, name: doc.recoveryName ?? (doc.filePath ? path.basename(doc.filePath) : 'Untitled.fountain') });
     if (latest && latest.record.id !== record.id) persistPending().catch(() => {});
     latest = { record, dirty: doc.dirty };
     clearTimeout(debounce); debounce = setTimeout(() => persistPending().catch(() => {}), debounceMs);

@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('beat', {
   current: () => ipcRenderer.invoke('document:current'),
-  update: (id, text, revision) => ipcRenderer.invoke('document:update', { id, text, revision }),
+  update: (id, text, revision, revisions) => ipcRenderer.invoke('document:update', { id, text, revision, revisions }),
   action: (action) => ipcRenderer.invoke('document:action', action),
   flushed: (token, update) => ipcRenderer.invoke('document:flushed', { token, update }),
   onFlush: (callback) => { const listener = (_event, token) => callback(token); ipcRenderer.on('document:flush', listener); return () => ipcRenderer.removeListener('document:flush', listener); },

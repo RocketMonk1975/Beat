@@ -1,3 +1,4 @@
+import { revisionExtensions, revisionField, setRevisions, markRevision, type Revisions } from './revisions';
 import { EditorState, Compartment, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWithTab, isolateHistory } from '@codemirror/commands';
@@ -7,12 +8,12 @@ import { browserLayout, renderPreview } from './preview';
 import type { PaperSize } from './pagination';
 import { parseFountain, type ParsedScript } from './fountain';
 import { AutomationError, checkPosition, validateEdits, type TextEdit } from './automation';
-interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; protection: string; }
+interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; revisions: Revisions; protection: string; }
 interface ConnectionState { enabled: boolean; lastAction: string; error: string; }
 interface AutomationRequest { requestId: string; deadline: number; documentId: string; revision: number; command: string; params: { from?: number; to?: number; edits?: TextEdit[] }; }
 declare global { interface Window { beat: {
-  current(): Promise<DocumentState>; update(id: string, text: string, revision: number): Promise<boolean>; action(action: string): Promise<boolean>;
-  flushed(token: string, update: { id: string; text: string; revision: number }): Promise<boolean>;
+  current(): Promise<DocumentState>; update(id: string, text: string, revision: number, revisions: Revisions): Promise<boolean>; action(action: string): Promise<boolean>;
+  flushed(token: string, update: { id: string; text: string; revision: number; revisions: Revisions }): Promise<boolean>;
   onFlush(callback: (token: string) => void): () => void;
   onDocument(callback: (doc: DocumentState) => void): () => void;
   onStatus(callback: (doc: DocumentState) => void): () => void;
@@ -20,7 +21,7 @@ declare global { interface Window { beat: {
   connection(): Promise<ConnectionState>; toggleConnection(): Promise<ConnectionState>;
   onConnection(callback: (connection: ConnectionState) => void): () => void;
   onAutomation(callback: (request: AutomationRequest) => void): () => void;
-  automationResponse(packet: { requestId: string; state?: { id: string; text: string; revision: number }; result?: unknown; error?: { code: string; message: string; status: number } }): Promise<boolean>;
+  automationResponse(packet: { requestId: string; state?: { id: string; text: string; revision: number; revisions: Revisions }; result?: unknown; error?: { code: string; message: string; status: number } }): Promise<boolean>;
 }; } }
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const readOnly = new Compartment();
@@ -31,7 +32,7 @@ let focusMode = false;
 let previewMode = false;
 const paperSize = () => $<HTMLSelectElement>('paper-size').value as PaperSize;
 function refreshPreview() {
-  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier`; }
+  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier${view.state.field(revisionField).ranges.length ? " · Revision marks omitted from preview/PDF" : ""}`; }
   catch (error) { $('preview-content').replaceChildren(); $('preview-summary').textContent = `Preview unavailable: ${(error as Error).message}`; }
 }
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,14 +88,16 @@ const formatter = ViewPlugin.fromClass(class {
 }, { decorations: value => value.decorations });
 
 const view = new EditorView({ parent: $('editor'), state: EditorState.create({ doc: '', extensions: [
-  history(), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
+  history(), revisionExtensions(), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
   readOnly.of([EditorState.readOnly.of(false), EditorView.editable.of(true)]),
   EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', 'aria-autocomplete': 'list', 'aria-controls': 'character-suggestions', spellcheck: 'true' }),
   keymap.of([...writingKeys, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
   EditorView.updateListener.of(update => {
-    if (update.docChanged && current && !loading) {
+    if ((update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(setRevisions)))) && current && !loading) {
       const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
-      sync = sync.then(() => window.beat.update(id, text, revision)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
+      const revisions = update.state.field(revisionField);
+      refreshRevisionControls(revisions);
+      sync = sync.then(() => window.beat.update(id, text, revision, revisions)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
       clearTimeout(outlineTimer); outlineTimer = setTimeout(renderOutline, 120);
     }
     if (update.selectionSet || update.docChanged) updateCursor();
@@ -106,14 +109,16 @@ function applyDocument(doc: DocumentState) {
   current = doc; editorRevision = doc.revision; loading = true;
   // A fresh state resets undo history so edits cannot cross document boundaries.
   const state = EditorState.create({ doc: doc.text, extensions: [
-    history(), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
+    history(), revisionExtensions(doc.revisions), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
     readOnly.of([EditorState.readOnly.of(doc.readOnly), EditorView.editable.of(!doc.readOnly)]),
     EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', 'aria-autocomplete': 'list', 'aria-controls': 'character-suggestions', spellcheck: 'true' }),
     keymap.of([...writingKeys, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
     EditorView.updateListener.of(update => {
-      if (update.docChanged && !loading) {
+      if ((update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(setRevisions)))) && !loading) {
         const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
-        sync = sync.then(() => window.beat.update(id, text, revision)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
+        const revisions = update.state.field(revisionField);
+      refreshRevisionControls(revisions);
+      sync = sync.then(() => window.beat.update(id, text, revision, revisions)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
         clearTimeout(outlineTimer); outlineTimer = setTimeout(renderOutline, 120);
       }
       if (update.selectionSet || update.docChanged) updateCursor();
@@ -125,7 +130,7 @@ function applyDocument(doc: DocumentState) {
   $('metadata-banner').hidden = !doc.readOnly;
   $('mode-label').textContent = doc.readOnly ? 'BEAT metadata protected · read-only' : 'Fountain · live formatting';
   $('file-mode').textContent = doc.readOnly ? 'PROTECTED DOCUMENT' : 'LOCAL DOCUMENT';
-  setStatus(doc); renderOutline(); updateCursor(); if (!previewMode) view.focus();
+  refreshRevisionControls(doc.revisions); setStatus(doc); renderOutline(); updateCursor(); if (!previewMode) view.focus();
 }
 function setStatus(doc: DocumentState) {
   if (current && doc.id !== current.id) return;
@@ -161,7 +166,7 @@ function renderOutline() {
 }
 function moveCurrentScene(direction: -1 | 1) {
   hideCompletion();
-  if (current.readOnly || $<HTMLInputElement>('outline-filter').value.trim()) return;
+  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
   const text = view.state.doc.toString(), active = [...parsed.outline].reverse().find(item => item.from <= view.state.selection.main.head);
   if (active?.type !== 'scene') return;
   try {
@@ -179,7 +184,7 @@ function updateCursor() {
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
   const activeIndex = parsed.outline.indexOf(active!);
   for (const [id, direction] of [['scene-up', -1], ['scene-down', 1]] as const) {
-    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
+    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
   }
   if (!loading) showCompletion();
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));
@@ -216,7 +221,7 @@ window.beat.onStatus(setStatus);
 window.beat.onCommand(command);
 window.beat.onFlush(async token => {
   await sync;
-  await window.beat.flushed(token, { id: current.id, text: view.state.doc.toString(), revision: editorRevision });
+  await window.beat.flushed(token, { id: current.id, text: view.state.doc.toString(), revision: editorRevision, revisions: view.state.field(revisionField) });
 });
 function setConnectionStatus(state: ConnectionState) {
   const button = $('codex-connection');
@@ -238,7 +243,7 @@ window.beat.onAutomation(async request => {
     if (request.command === 'layout') {
       await document.fonts.ready;
       const layout = browserLayout(parsed, paperSize());
-      await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision }, result: { layout } });
+      await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision, revisions: view.state.field(revisionField) }, result: { layout } });
       return;
     }
     if (request.command === 'edit') {
@@ -256,7 +261,7 @@ window.beat.onAutomation(async request => {
     else if (request.command !== 'selection') throw new AutomationError('INVALID_COMMAND', 'Unknown editor command.');
     await sync;
     const selection = view.state.selection.main;
-    await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision }, result: { changed, selection: { from: selection.from, to: selection.to, line: view.state.doc.lineAt(selection.head).number, text: view.state.doc.sliceString(selection.from, Math.min(selection.to, selection.from + 50000)), truncated: selection.to - selection.from > 50000 } } });
+    await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision, revisions: view.state.field(revisionField) }, result: { changed, selection: { from: selection.from, to: selection.to, line: view.state.doc.lineAt(selection.head).number, text: view.state.doc.sliceString(selection.from, Math.min(selection.to, selection.from + 50000)), truncated: selection.to - selection.from > 50000 } } });
   } catch (error) {
     const problem = error as AutomationError;
     await window.beat.automationResponse({ requestId: request.requestId, error: { code: problem.code ?? 'EDITOR_ERROR', message: problem.message, status: problem.status ?? 409 } });
@@ -264,3 +269,22 @@ window.beat.onAutomation(async request => {
 });
 if (localStorage.getItem('beat-theme') === 'light') { document.body.classList.add('light'); $('theme').textContent = 'Dark'; }
 window.beat.current().then(applyDocument).catch(error => { $('save-state').textContent = `Unable to load document: ${error.message}`; });
+
+function refreshRevisionControls(value: Revisions) {
+  $<HTMLInputElement>('revision-track').checked = value.enabled;
+  $<HTMLSelectElement>('revision-generation').value = String(value.generation);
+  for (const id of ['revision-track', 'revision-generation', 'revision-add', 'revision-remove', 'revision-clear']) ($<HTMLButtonElement>(id)).disabled = current?.readOnly ?? true;
+  $('revision-summary').textContent = `${value.ranges.length} revision ranges · deletions erase text; mark suggested removals before deleting`;
+}
+function changeRevisions(value: Revisions) {
+  if (current.readOnly) return;
+  view.dispatch({ effects: setRevisions.of(value), annotations: isolateHistory.of('full') });
+  updateCursor(); view.focus();
+}
+$('revision-track').addEventListener('change', () => changeRevisions({ ...view.state.field(revisionField), enabled: $<HTMLInputElement>('revision-track').checked }));
+$('revision-generation').addEventListener('change', () => changeRevisions({ ...view.state.field(revisionField), generation: Number($<HTMLSelectElement>('revision-generation').value) }));
+for (const [id, kind] of [['revision-add', 'Addition'], ['revision-remove', 'RemovalSuggestion'], ['revision-clear', null]] as const) $(id).addEventListener('click', () => {
+  const { from, to } = view.state.selection.main;
+  if (to <= from) { $('revision-summary').textContent = 'Select text to mark or clear a revision.'; return; }
+  changeRevisions(markRevision(view.state.field(revisionField), from, to, kind));
+});
