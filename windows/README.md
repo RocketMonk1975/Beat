@@ -1,5 +1,7 @@
 # BEAT Windows preview
 
+Version 0.2.0 adds a local Codex connection. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
 ## Run the packaged app
@@ -27,6 +29,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 - Basic live screenplay formatting with source markup visible.
 - Scene/section outline, filtering, synopsis display and navigation.
 - Undo/redo, find/replace, dark/light themes and focus mode.
+- Local Codex control: read, search, navigate, apply undoable edits, undo/redo and save a named script. Pause the connection from the footer.
 - Unsaved-change prompts and detection of externally changed files before overwriting.
 - Existing BEAT metadata documents open read-only and round-trip intact. File > Create editable copy creates a new Fountain-only document; the copy omits BEAT metadata and must be saved under another filename.
 

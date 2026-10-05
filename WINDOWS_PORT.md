@@ -1,6 +1,6 @@
 # BEAT Windows port: initial assessment
 
-Status: first Windows writing prototype implemented and packaged. Ten parser/document tests and thirteen real Electron desktop checks passed on 2026-10-05.
+Status: Windows prototype 0.2.0 includes a local Codex connection. Twenty-three core/protocol tests and twenty-three real Electron desktop checks passed on 2026-10-05.
 Upstream: https://github.com/lmparppei/Beat
 Fork: https://github.com/RocketMonk1975/Beat
 Inspected upstream commit: 7abc3e43818f56f76ab3829a50329f65fd49661c
@@ -45,8 +45,12 @@ Cover forced element types, character cues, dialogue, parentheticals, transition
 
 ## Initial verification
 
-The application is in windows/. Its portable executable is generated under windows/release/BEAT Windows-win32-x64/. Ten parser/document tests passed, including exact file round-trips, both metadata formats, Unicode positions, and upstream samples. Thirteen real Electron desktop checks passed, including typing, formatting, outline navigation/filtering, save, cancel flows, undo/redo, cross-document history, external-file conflicts, protected metadata, editable copies, invalid UTF-8, and opening Big Fish with 192 scene headings. TypeScript and JavaScript syntax checks passed. npm audit reported zero vulnerabilities at verification time.
+The application is in windows/. Its portable executable is generated under windows/release/0.2.0/BEAT Windows-win32-x64/. Ten parser/document tests passed, including exact file round-trips, both metadata formats, Unicode positions, and upstream samples. Thirteen real Electron desktop checks passed, including typing, formatting, outline navigation/filtering, save, cancel flows, undo/redo, cross-document history, external-file conflicts, protected metadata, editable copies, invalid UTF-8, and opening Big Fish with 192 scene headings. TypeScript and JavaScript syntax checks passed. npm audit reported zero vulnerabilities at verification time.
 
 The desktop checks ran from the user's normal PowerShell session because the Codex process sandbox prevented Electron's child sandbox from accessing the runtime. No sandbox protections were disabled. The executable was packaged and its application archive checked for required runtime files; clean-machine installation remains unverified.
 
 Existing files with legacy or modern BEAT metadata are deliberately read-only. The explicit editable-copy action creates a new Fountain-only document and prevents overwriting known source metadata files. Range-based revision/tag editing, production pagination, PDF/FDX output, and plugins remain future work. The parser has not yet been validated against native macOS parser output.
+
+## Local Codex connection (0.2.0)
+
+Eleven MCP tools can inspect the open screenplay, navigate scenes, select text, apply reviewed edits, replace text, undo/redo, and save a named document. The loopback bridge uses per-instance credentials, revision and expected-text guards, and grouped undo. The writer can pause it in the app. All 23 core/protocol tests and 23 actual desktop checks passed; see windows/CONNECTION.md and windows/VERIFICATION.md.

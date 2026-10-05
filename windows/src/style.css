@@ -72,6 +72,7 @@ body.light button.primary { color:white; }
 .statusbar>span:first-child { display:flex; align-items:center; gap:7px; font-size:8px; letter-spacing:1px; }
 .status-dot { width:5px; height:5px; border-radius:50%; background:var(--accent); }
 #cursor { margin-left:auto; }
+#codex-connection { font-size:10px; padding:3px 7px; color:var(--accent); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .shortcut-hint { color:var(--muted); opacity:.7; }
 body.focus-mode .outline-panel { display:none; }
 body.focus-mode .writing-heading { visibility:hidden; }

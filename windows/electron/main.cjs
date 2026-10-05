@@ -3,18 +3,23 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { decodeDocument, encodeDocument } = require('../dist/document.cjs');
+const { createBridge } = require('./bridge.cjs');
+const { AutomationError, checkDocument, checkPosition, validateEdits, summary, documentSlice, findText, outline } = require('../dist/automation.cjs');
 
 if (process.env.BEAT_USER_DATA) app.setPath('userData', process.env.BEAT_USER_DATA);
 app.setName('BEAT Windows');
 let win, doc, busy = false, allowClose = false;
 const flushes = new Map();
+const editorRequests = new Map();
+let bridge = null, connectionError = '', lastAutomation = '', bridgeTransitions = Promise.resolve(), bridgeClosing = false;
+const connectionFile = process.env.BEAT_BRIDGE_FILE ?? (app.isPackaged ? path.join(app.getPath('userData'), 'codex-bridge.json') : path.resolve(__dirname, '../../../work/codex-bridge.json'));
 const welcome = 'Title: A new story\nAuthor: Your name\n\n# Act One\n\nINT. WRITING ROOM - DAY\n\nA blank page. A little courage. The beginning of something.\n\nWRITER\nEvery story starts somewhere.\n\nEXT. CITY STREET - EVENING\n\nThe world keeps moving.\n';
 function createDocument(text = '', filePath = null) {
   const model = decodeDocument(text);
-  return { id: randomUUID(), filePath, model, text: model.text, dirty: false, forceUnsaved: false,
+  return { id: randomUUID(), revision: 0, filePath, model, text: model.text, dirty: false, forceUnsaved: false,
     protectedPaths: new Set(), metadataPaths: new Set(model.metadata !== null && filePath ? [path.resolve(filePath).toLowerCase()] : []) };
 }
-function snapshot() { return { id: doc.id, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null }; }
+function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null }; }
 function status() {
   const state = snapshot();
   win.setTitle(`${state.dirty ? '• ' : ''}${state.name} — BEAT Windows`);
@@ -26,9 +31,70 @@ function trusted(event) {
 }
 function applyUpdate(update) {
   if (update?.id !== doc.id || typeof update.text !== 'string') return false;
+  if (!Number.isInteger(update.revision) || update.revision < 0) return false;
   if (update.text.length > 20 * 1024 * 1024) throw new Error('Document exceeds the 20 MB prototype limit.');
   if (doc.model.metadata !== null && update.text !== doc.model.text) return false;
-  doc.text = update.text; doc.dirty = doc.text !== doc.model.text || doc.forceUnsaved; status(); return true;
+  if (update.revision < doc.revision) return true;
+  if (update.revision === doc.revision && update.text !== doc.text) return false;
+  doc.text = update.text; doc.revision = update.revision; doc.dirty = doc.text !== doc.model.text || doc.forceUnsaved; status(); return true;
+}
+function connectionStatus() { return { enabled: bridge !== null, lastAction: lastAutomation, error: connectionError }; }
+function publishConnection() { if (win && !win.isDestroyed()) win.webContents.send('automation:status', connectionStatus()); }
+function editorTask(command, params, state) {
+  return new Promise((resolve, reject) => {
+    const requestId = randomUUID(), deadline = Date.now() + 8000;
+    const timeout = setTimeout(() => { editorRequests.delete(requestId); reject(new AutomationError('EDITOR_TIMEOUT', 'The editor command timed out. Read the document before retrying.', 504)); }, 8000);
+    editorRequests.set(requestId, { resolve: result => { clearTimeout(timeout); resolve(result); }, reject: error => { clearTimeout(timeout); reject(error); } });
+    win.webContents.send('automation:request', { requestId, deadline, command, params, documentId: state.id, revision: state.revision });
+  });
+}
+async function automate(command, params) {
+  const supported = ['get-document', 'get-outline', 'get-selection', 'find', 'go-to-scene', 'select', 'edit', 'replace', 'undo', 'redo', 'save'];
+  if (!supported.includes(command)) throw new AutomationError('INVALID_COMMAND', 'Unknown BEAT command.');
+  if (busy) throw new AutomationError('BUSY', 'BEAT is handling another operation. Try again once it finishes.', 409);
+  busy = true;
+  try {
+    await flushRenderer();
+    const state = snapshot();
+    if (command === 'get-document') return documentSlice(state, params);
+    if (command === 'get-outline') return outline(state, params.query);
+    if (command === 'find') { const found = findText(state.text, params.query, params.caseSensitive !== false); return { documentId: state.id, revision: state.revision, count: found.count, matches: found.matches.slice(0, 100), truncated: found.count > 100 }; }
+    if (command === 'get-selection') return { ...await editorTask('selection', {}, state), documentId: doc.id, revision: doc.revision };
+    checkDocument(state, params);
+    if (['edit', 'replace', 'undo', 'redo'].includes(command) && state.readOnly) throw new AutomationError('READ_ONLY', 'This BEAT document has protected metadata. Create an editable copy in the app first.', 409);
+    let editorCommand = command, editorParams = params;
+    if (command === 'edit') editorParams = { edits: validateEdits(state.text, params.edits) };
+    if (command === 'replace') {
+      if (typeof params.replace !== 'string') throw new AutomationError('INVALID_EDITS', 'Replacement text must be a string.');
+      const found = findText(state.text, params.find, params.caseSensitive !== false);
+      if (!Number.isInteger(params.expectedOccurrences) || params.expectedOccurrences < 1 || params.expectedOccurrences !== found.count || found.truncated) throw new AutomationError('CONFLICT', `Found ${found.count} occurrences. Supply that count after reviewing the matches (maximum 1000).`, 409);
+      editorCommand = 'edit'; editorParams = { edits: validateEdits(state.text, found.matches.map(match => ({ from: match.from, to: match.to, insert: params.replace, expectedText: match.text }))) };
+    }
+    if (command === 'go-to-scene') {
+      const scene = outline(state).items.find(item => item.type === 'scene' && item.line === params.line);
+      if (!scene) throw new AutomationError('INVALID_SCENE', 'Choose a scene heading line from the current outline.');
+      editorCommand = 'select'; editorParams = { from: scene.from, to: scene.from };
+    }
+    if (command === 'select') { checkPosition(state.text, params.from); checkPosition(state.text, params.to); if (params.to < params.from) throw new AutomationError('INVALID_RANGE', 'Selection end precedes its start.'); }
+    if (command === 'save') {
+      if (!doc.filePath) throw new AutomationError('NEEDS_FILENAME', 'Use File > Save in BEAT to choose a filename first.', 409);
+      await save(); lastAutomation = 'saved'; publishConnection(); return { document: summary(snapshot()), saved: true };
+    }
+    const result = await editorTask(editorCommand, editorParams, state);
+    lastAutomation = ['edit', 'replace'].includes(command) ? 'edited · Ctrl+Z to undo' : command === 'go-to-scene' || command === 'select' ? 'navigated' : command === 'undo' ? 'undid an edit' : 'redid an edit';
+    publishConnection(); return { ...result, document: summary(snapshot()) };
+  } finally { busy = false; }
+}
+function setConnection(enabled) {
+  bridgeTransitions = bridgeTransitions.then(async () => {
+    try {
+      if (enabled && !bridge) bridge = await createBridge({ connectionFile, onRequest: automate });
+      if (!enabled && bridge) { const previous = bridge; bridge = null; await previous.close(); }
+      connectionError = ''; lastAutomation = '';
+    } catch (error) { connectionError = error.message; }
+    publishConnection(); return connectionStatus();
+  });
+  return bridgeTransitions;
 }
 function flushRenderer() {
   return new Promise((resolve, reject) => {
@@ -118,7 +184,8 @@ app.whenReady().then(async () => {
     { label: 'File', submenu: [file('New', 'Ctrl+N', 'new'), file('Open…', 'Ctrl+O', 'open'), { type: 'separator' }, file('Save', 'Ctrl+S', 'save'), file('Save As…', 'Ctrl+Shift+S', 'save-as'), { type: 'separator' }, file('Create editable copy…', undefined, 'editable-copy'), { type: 'separator' }, { label: 'Exit', accelerator: 'Alt+F4', click: () => win.close() }] },
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Prototype 0.1.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Basic Fountain editing and outlining are available. Pagination, PDF/FDX export, revisions and plugins are not implemented yet.' }) }] }
+    { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.2.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Pagination, PDF/FDX export, revisions and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {
@@ -136,6 +203,19 @@ app.whenReady().then(async () => {
     } catch (error) { pending.reject(error); return false; }
   });
   ipcMain.handle('document:action', (event, action) => { trusted(event); return runAction(action); });
+  ipcMain.handle('automation:current', event => { trusted(event); return connectionStatus(); });
+  ipcMain.handle('automation:toggle', event => { trusted(event); return setConnection(!bridge); });
+  ipcMain.handle('automation:response', (event, packet) => {
+    trusted(event);
+    const pending = editorRequests.get(packet?.requestId);
+    if (!pending) return false;
+    editorRequests.delete(packet.requestId);
+    if (packet.error) { pending.reject(new AutomationError(packet.error.code ?? 'EDITOR_ERROR', packet.error.message, packet.error.status ?? 409)); return false; }
+    try {
+      if (!applyUpdate(packet.state)) throw new AutomationError('CONFLICT', 'The editor document changed during the command. Read it again.', 409);
+      pending.resolve(packet.result); return true;
+    } catch (error) { pending.reject(error); return false; }
+  });
   win.on('close', async event => {
     if (allowClose) return;
     event.preventDefault();
@@ -149,8 +229,15 @@ app.whenReady().then(async () => {
   const argument = process.argv.slice(app.isPackaged ? 1 : 2).find(value => !value.startsWith('-') && /\.(fountain|txt)$/i.test(value));
   if (argument) { try { await openFile(path.resolve(argument)); } catch (error) { await dialog.showMessageBox(win, { type: 'error', message: error.message }); } }
   status();
+  await setConnection(true);
   if (!app.isPackaged && process.env.BEAT_SMOKE_TEST === '1') {
-    require('../tests/desktop-main.cjs')({ app, win, dialog, snapshot, runAction, openFile });
+    require('../tests/desktop-main.cjs')({ app, win, dialog, snapshot, runAction, openFile, automate, setConnection, connectionFile });
   } else win.show();
 });
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', event => {
+  if (!bridge || bridgeClosing) return;
+  event.preventDefault(); bridgeClosing = true;
+  const previous = bridge; bridge = null;
+  previous.close().finally(() => app.quit());
+});

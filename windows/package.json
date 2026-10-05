@@ -1,6 +1,6 @@
 {
   "name": "beat-windows",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "An early Windows port of BEAT's Fountain writing workflow",
   "license": "GPL-3.0-or-later",
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs",
     "start": "npm run build && electron .",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/*.test.cjs",
     "test:desktop": "node tests/desktop.mjs",
     "package": "npm run build && node scripts/package.mjs"
   },
@@ -21,10 +21,13 @@
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
+    "@modelcontextprotocol/client": "^2.3.0",
+    "@modelcontextprotocol/server": "^2.3.0",
     "@types/node": "^24.0.0",
     "electron": "44.5.1",
     "esbuild": "^0.25.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "zod": "^4.6.5"
   }
 }
