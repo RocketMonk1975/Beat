@@ -20,11 +20,13 @@
       <div class="panel-heading"><h1>Outline</h1><span id="scene-count">0 scenes</span></div>
       <div class="outline-tabs"><span class="active">SCENES & SECTIONS</span></div>
       <input id="outline-filter" type="search" placeholder="Filter scenes…" aria-label="Filter scenes">
+      <div class="scene-actions"><button id="scene-up" disabled title="Move selected scene up">Move up</button><button id="scene-down" disabled title="Move selected scene down">Move down</button></div><span id="writing-status" role="status" aria-live="polite"></span>
       <nav id="outline" aria-label="Scenes and sections"></nav>
       <div class="sidebar-foot"><span class="small-logo">(beat)</span><p>A little space.<br>A world of stories.</p></div>
     </aside>
     <section class="writing-workspace" aria-label="Writing workspace">
       <div class="writing-heading"><span>SCREENPLAY</span><span id="mode-label">Fountain · live formatting</span></div>
+      <div id="character-suggestions" role="listbox" aria-label="Character names · arrows to choose, Tab to accept, Escape to dismiss" hidden></div>
       <div id="editor"></div>
       <section id="preview-pane" tabindex="0" aria-label="Paginated screenplay preview" hidden><div class="preview-help"><label>Paper <select id="paper-size" aria-label="Screenplay paper size"><option>Letter</option><option>A4</option></select></label> <span id="preview-summary"></span> <button id="export-pdf">Export PDF…</button></div><div id="preview-content"></div></section>
     </section>

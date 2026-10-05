@@ -2,6 +2,7 @@ import { EditorState, Compartment, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWithTab, isolateHistory } from '@codemirror/commands';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
+import { characterSuggestions, sceneMove, type CharacterMatch } from './writing-tools';
 import { browserLayout, renderPreview } from './preview';
 import type { PaperSize } from './pagination';
 import { parseFountain, type ParsedScript } from './fountain';
@@ -36,6 +37,40 @@ function refreshPreview() {
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
 let sync: Promise<unknown> = Promise.resolve();
 let editorRevision = 0;
+let completion: CharacterMatch | null = null, completionIndex = 0, completionRevision = -1;
+function hideCompletion() { completion = null; $('character-suggestions').hidden = true; view.contentDOM.removeAttribute('aria-activedescendant'); }
+function showCompletion(explicit = false) {
+  if (!current || current.readOnly || previewMode || !view.state.selection.main.empty) { hideCompletion(); return; }
+  completion = characterSuggestions(view.state.doc.toString(), view.state.selection.main.head, explicit, parsed.characters);
+  const panel = $('character-suggestions'); panel.replaceChildren();
+  if (!completion) { hideCompletion(); return; }
+  completionIndex = 0; completionRevision = editorRevision; panel.hidden = false;
+  completion.names.forEach((name, index) => {
+    const option = document.createElement('button'); option.id = `character-option-${index}`; option.type = 'button'; option.setAttribute('role', 'option'); option.textContent = name;
+    option.addEventListener('mousedown', event => event.preventDefault()); option.addEventListener('click', () => acceptCharacter(index)); panel.append(option);
+  });
+  selectCompletion(0);
+}
+function selectCompletion(index: number) {
+  if (!completion) return;
+  completionIndex = (index + completion.names.length) % completion.names.length;
+  for (const [i, option] of [...$('character-suggestions').children].entries()) option.setAttribute('aria-selected', String(i === completionIndex));
+  view.contentDOM.setAttribute('aria-activedescendant', `character-option-${completionIndex}`);
+}
+function acceptCharacter(index = completionIndex): boolean {
+  if (!completion || current.readOnly || completionRevision !== editorRevision) { hideCompletion(); return false; }
+  const match = completion, name = match.names[index]; if (!name) return false;
+  hideCompletion();
+  view.dispatch({ changes: { from: match.from, to: match.to, insert: name }, selection: { anchor: match.from + name.length }, annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.complete')] });
+  hideCompletion(); view.focus(); return true;
+}
+const writingKeys = [
+  { key: 'Ctrl-Space', run: () => { showCompletion(true); return true; } },
+  { key: 'ArrowDown', run: () => { if (!completion) return false; selectCompletion(completionIndex + 1); return true; } },
+  { key: 'ArrowUp', run: () => { if (!completion) return false; selectCompletion(completionIndex - 1); return true; } },
+  { key: 'Tab', run: () => acceptCharacter() },
+  { key: 'Escape', run: () => { if (!completion) return false; hideCompletion(); return true; } }
+];
 const formatter = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   constructor(view: EditorView) { this.decorations = this.make(view); }
@@ -54,8 +89,8 @@ const formatter = ViewPlugin.fromClass(class {
 const view = new EditorView({ parent: $('editor'), state: EditorState.create({ doc: '', extensions: [
   history(), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
   readOnly.of([EditorState.readOnly.of(false), EditorView.editable.of(true)]),
-  EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', spellcheck: 'true' }),
-  keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
+  EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', 'aria-autocomplete': 'list', 'aria-controls': 'character-suggestions', spellcheck: 'true' }),
+  keymap.of([...writingKeys, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
   EditorView.updateListener.of(update => {
     if (update.docChanged && current && !loading) {
       const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
@@ -67,13 +102,14 @@ const view = new EditorView({ parent: $('editor'), state: EditorState.create({ d
 ] }) });
 
 function applyDocument(doc: DocumentState) {
+  if (current) hideCompletion();
   current = doc; editorRevision = doc.revision; loading = true;
   // A fresh state resets undo history so edits cannot cross document boundaries.
   const state = EditorState.create({ doc: doc.text, extensions: [
     history(), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
     readOnly.of([EditorState.readOnly.of(doc.readOnly), EditorView.editable.of(!doc.readOnly)]),
-    EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', spellcheck: 'true' }),
-    keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
+    EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', 'aria-autocomplete': 'list', 'aria-controls': 'character-suggestions', spellcheck: 'true' }),
+    keymap.of([...writingKeys, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]), formatter,
     EditorView.updateListener.of(update => {
       if (update.docChanged && !loading) {
         const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
@@ -123,16 +159,35 @@ function renderOutline() {
   if (!container.childElementCount) { const empty = document.createElement('p'); empty.className = 'outline-empty'; empty.textContent = query ? 'No matching scenes.' : 'Your outline grows as you write. Start a scene with INT. or EXT., or add a section with #.'; container.append(empty); }
   updateCursor();
 }
+function moveCurrentScene(direction: -1 | 1) {
+  hideCompletion();
+  if (current.readOnly || $<HTMLInputElement>('outline-filter').value.trim()) return;
+  const text = view.state.doc.toString(), active = [...parsed.outline].reverse().find(item => item.from <= view.state.selection.main.head);
+  if (active?.type !== 'scene') return;
+  try {
+    const edit = sceneMove(text, active.from, direction);
+    if (view.state.doc.sliceString(edit.from, edit.to) !== edit.expectedText) throw new Error('The scene changed. Select it again.');
+    if (previewMode) setPreview(false);
+    view.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert }, selection: { anchor: edit.anchor }, annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.move-scene')] });
+    clearTimeout(outlineTimer); renderOutline(); view.focus(); $('writing-status').textContent = 'Scene moved. Ctrl+Z to undo.';
+  } catch (error) { $('writing-status').textContent = (error as Error).message; }
+}
 function updateCursor() {
   const position = view.state.selection.main.head, line = view.state.doc.lineAt(position);
   const element = parsed.lines[line.number - 1]?.type ?? 'action';
   $('cursor').textContent = `Line ${line.number} · ${element[0].toUpperCase() + element.slice(1)}`;
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
+  const activeIndex = parsed.outline.indexOf(active!);
+  for (const [id, direction] of [['scene-up', -1], ['scene-down', 1]] as const) {
+    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
+  }
+  if (!loading) showCompletion();
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));
 }
 function setPreview(enabled: boolean) {
   clearTimeout(outlineTimer);
   renderOutline();
+  hideCompletion();
   previewMode = enabled;
   $('preview').setAttribute('aria-pressed', String(enabled));
   $('preview-pane').hidden = !enabled;
@@ -150,6 +205,8 @@ function command(action: string) {
   if (action === 'focus') { focusMode = !focusMode; document.body.classList.toggle('focus-mode', focusMode); $('focus').setAttribute('aria-pressed', String(focusMode)); }
   if (action === 'theme') { const light = document.body.classList.toggle('light'); $('theme').textContent = light ? 'Dark' : 'Light'; localStorage.setItem('beat-theme', light ? 'light' : 'dark'); }
 }
+$('scene-up').addEventListener('click', () => moveCurrentScene(-1));
+$('scene-down').addEventListener('click', () => moveCurrentScene(1));
 $('paper-size').addEventListener('change', () => { if (previewMode) refreshPreview(); });
 for (const action of ['new', 'open', 'save', 'editable-copy', 'export-pdf']) $(action).addEventListener('click', async () => { await sync; await window.beat.action(action); });
 for (const action of ['find', 'focus', 'theme', 'preview']) $(action).addEventListener('click', () => command(action));

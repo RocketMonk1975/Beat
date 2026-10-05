@@ -121,3 +121,12 @@ body.focus-mode .file-actions,body.focus-mode .brand { opacity:.45; }
 .preview-help select { background:var(--surface); color:var(--text); border:1px solid var(--line); padding:4px; }
 
 #preview-content .uppercase { text-transform:uppercase; }
+
+.scene-actions { display:flex; gap:4px; margin-bottom:8px; }
+.scene-actions button { font-size:11px; padding:5px 8px; }
+button:disabled { opacity:.4; cursor:default; }
+#writing-status { font-size:11px; color:var(--muted); }
+#character-suggestions { flex-shrink:0; display:flex; flex-wrap:wrap; gap:3px; padding:5px 24px; background:var(--panel); border-bottom:1px solid var(--line); }
+#character-suggestions[hidden] { display:none; }
+#character-suggestions button { font-size:12px; }
+#character-suggestions [aria-selected=true] { background:var(--hover); color:var(--accent); outline:1px solid var(--accent); }

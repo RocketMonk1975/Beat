@@ -35,7 +35,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Autocomplete, scene reordering, FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -69,3 +69,10 @@ Preview uses physical Letter (default) or A4 pages, 12-point Courier New, one-in
 Choose paper size in Preview. File > Export PDF (Ctrl+Alt+P), or Preview's Export PDF button, uses that same measured layout. Export does not save the script or clear its recovery draft. Cancellation, storage errors and changes during export leave the screenplay untouched. Existing PDF destinations are checked before atomic replacement. The exporter runs in an isolated sandboxed window with JavaScript disabled.
 
 This is the first pagination implementation, not verified production parity with native macOS BEAT. Font fallback for non-Latin text depends on installed Windows fonts. Very long character cues use at most two rows in repeated continuation headers. Native revision marks, scene continuation numbering, customized print styles, headers/footers and FDX export remain future work. Inspect the PDF before production use.
+
+
+### Writing tools (0.6.0)
+
+Character names already used in the current script appear as suggestions when typing an uppercase cue or an @-forced cue after a blank line. Ctrl+Space also opens suggestions on a blank cue line. Arrow keys select, Tab accepts, Escape dismisses, and clicking accepts. Cue extensions such as (V.O.) and dual-dialogue ^ markers remain intact. Suggestions never replace text without acceptance and are disabled for protected documents.
+
+Select a scene in the outline, then use Move up or Move down. The scene's heading, synopsis, comments and body move together with one undo step. Explicit scene numbers stay with their scene; automatic numbers follow the new order. Title pages and section headings stay in place. Moves cannot cross a section and are disabled while the outline is filtered or the document is read-only. An EOF scene lacking a final blank separator gets one when needed to keep headings distinct. Moves remain unsaved and receive normal recovery checkpoints.
