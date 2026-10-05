@@ -23,7 +23,8 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
       await waitFor("window.getSelection().toString().length > 0", 'select-all command');
     }
     await win.webContents.insertText(text);
-    await waitFor(`document.querySelector('.cm-content').textContent.includes(${JSON.stringify(text.split('\n').find(Boolean))})`, 'editor insertion');
+    await waitFor(`window.beat.current().then(doc => doc.text.length === ${text.length})`, 'editor insertion');
+    assert.equal(snapshot().text, text);
     await waitFor("document.getElementById('save-state').textContent === 'Unsaved changes'", 'document sync');
   };
   let nextSave = path.join(root, 'roundtrip.fountain');
@@ -243,10 +244,10 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     assert.equal(snapshot().text, formatSource);
     await js("document.getElementById('preview').click()");
     assert.equal(await js("document.getElementById('editor').hidden && !document.getElementById('preview-pane').hidden && document.getElementById('preview').getAttribute('aria-pressed') === 'true'"), true);
-    assert.equal(await js("document.querySelectorAll('#preview-content .dual-dialogue .dual-column').length"), 2);
-    assert.equal(await js("document.querySelector('#preview-content .dual-left').textContent.trim()"), 'JaneHello.More.');
-    assert.equal(await js("Array.from(document.querySelectorAll('#preview-content .dual-right .preview-line')).map(line=>line.textContent.trim()).join('')"), 'John(replying)Yes.');
-    assert.equal(await js("getComputedStyle(document.querySelector('.dual-dialogue')).display"), 'grid');
+    assert.equal(await js("new Set(Array.from(document.querySelectorAll('#preview-content .dual-left,.dual-right')).map(row=>row.classList.contains('dual-left')?'left':'right')).size"), 2);
+    assert.equal(await js("Array.from(document.querySelectorAll('#preview-content .dual-left')).map(row=>row.textContent.trim()).join('')"), 'JaneHello.More.');
+    assert.equal(await js("Array.from(document.querySelectorAll('#preview-content .dual-right')).map(line=>line.textContent.trim()).join('')"), 'John(replying)Yes.');
+    assert.equal(await js("getComputedStyle(document.querySelector('#preview-content .dual-left')).position"), 'absolute');
     assert.equal(await js("document.querySelectorAll('#preview-content img').length"), 0);
     const previewText = await js("document.getElementById('preview-content').textContent");
     assert.ok(previewText.includes('<img src=x onerror=alert(1)>'));
@@ -255,7 +256,7 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     assert.equal(snapshot().text, formatSource);
     check('live emphasis and simultaneous-dialogue preview preserve exact source and render markup safely');
     await remote('replace', { ...guard(), find: 'Hello.', replace: 'Good evening.', expectedOccurrences: 1 });
-    await waitFor("document.querySelector('#preview-content .dual-left').textContent.includes('Good evening.')", 'preview updates after automation');
+    await waitFor("Array.from(document.querySelectorAll('#preview-content .dual-left')).some(row=>row.textContent.includes('Good evening.'))", 'preview updates after automation');
     await js("document.getElementById('preview').click()");
     await remote('undo', guard()); assert.equal(snapshot().text, formatSource);
     await js("document.getElementById('preview').click()");
@@ -267,8 +268,28 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     await fs.writeFile(path.join(root, 'desktop-preview.png'), (await win.capturePage()).toPNG());
     await js("document.getElementById('preview').click()");
     answer = 1; await runAction('new');
+    await edit('Title: PDF Test\nAuthor: A Writer\n\nINT. PRINT ROOM - DAY\n\n!'+ 'An action sentence. '.repeat(450) + '\n\n@JANE\n'+ 'A dialogue sentence. '.repeat(240));
+    await js("document.getElementById('preview').click()");
+    const expectedPages = await js("document.querySelectorAll('#preview-content .screenplay-page').length");
+    assert.ok(expectedPages >= 4);
+    const beforeExport = snapshot(); nextSave = null;
+    assert.equal(await runAction('export-pdf'), false);
+    assert.equal(snapshot().dirty, true); assert.equal(snapshot().revision, beforeExport.revision);
+    nextSave = path.join(root, 'screenplay-letter.pdf');
+    assert.equal(await runAction('export-pdf'), true);
+    const pdf = await fs.readFile(nextSave); assert.equal(pdf.subarray(0,5).toString(), '%PDF-');
+    assert.equal(snapshot().text, beforeExport.text); assert.equal(snapshot().dirty, true);
+    await fs.writeFile(path.join(root,'pdf-preview-pages.json'), JSON.stringify({expectedPages, size:'Letter'}));
+    check('paginated Letter preview exports a real PDF without saving or changing the screenplay; cancellation preserves edits');
+    await js("document.getElementById('paper-size').value='A4';document.getElementById('paper-size').dispatchEvent(new Event('change'))");
+    assert.ok((await js("document.getElementById('preview-summary').textContent")).includes('A4'));
+    nextSave = path.join(root, 'screenplay-a4.pdf'); assert.equal(await runAction('export-pdf'),true);
+    await fs.writeFile(path.join(root,'desktop-pagination.png'), (await win.capturePage()).toPNG());
+    check('A4 preview and PDF export use the selected physical page size');
+    await js("document.getElementById('preview').click()");
+    answer=1; await runAction('new');
     assert.deepEqual(errors, []);
-    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.4.0', passed: checks.length, checks, errors }, null, 2));
+    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.5.0', passed: checks.length, checks, errors }, null, 2));
     console.log(`DESKTOP TESTS PASSED: ${checks.length}`);
     await setConnection(false); app.exit(0);
   } catch (error) {

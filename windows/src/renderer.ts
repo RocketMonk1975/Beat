@@ -2,7 +2,8 @@ import { EditorState, Compartment, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWithTab, isolateHistory } from '@codemirror/commands';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
-import { renderPreview } from './preview';
+import { browserLayout, renderPreview } from './preview';
+import type { PaperSize } from './pagination';
 import { parseFountain, type ParsedScript } from './fountain';
 import { AutomationError, checkPosition, validateEdits, type TextEdit } from './automation';
 interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; protection: string; }
@@ -27,6 +28,11 @@ let parsed: ParsedScript = parseFountain('');
 let loading = false;
 let focusMode = false;
 let previewMode = false;
+const paperSize = () => $<HTMLSelectElement>('paper-size').value as PaperSize;
+function refreshPreview() {
+  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier`; }
+  catch (error) { $('preview-content').replaceChildren(); $('preview-summary').textContent = `Preview unavailable: ${(error as Error).message}`; }
+}
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
 let sync: Promise<unknown> = Promise.resolve();
 let editorRevision = 0;
@@ -40,7 +46,7 @@ const formatter = ViewPlugin.fromClass(class {
       ...(line.type !== 'empty' ? [Decoration.line({ attributes: { class: `element-${line.type}${line.dualSide ? ` dual-source-${line.dualSide}` : ''}` } }).range(line.from)] : []),
       ...line.inline.filter(range => range.to > range.from).map(range => Decoration.mark({ class: `inline-${range.style}` }).range(range.from, range.to))
     ]);
-    if (previewMode) renderPreview(parsed, $('preview-content'));
+    if (previewMode) refreshPreview();
     return Decoration.set(ranges, true);
   }
 }, { decorations: value => value.decorations });
@@ -131,7 +137,7 @@ function setPreview(enabled: boolean) {
   $('preview').setAttribute('aria-pressed', String(enabled));
   $('preview-pane').hidden = !enabled;
   $('editor').hidden = enabled;
-  if (enabled) { renderPreview(parsed, $('preview-content')); $('preview-pane').focus(); }
+  if (enabled) { refreshPreview(); $('preview-pane').focus(); }
   else view.focus();
 }
 function command(action: string) {
@@ -144,7 +150,8 @@ function command(action: string) {
   if (action === 'focus') { focusMode = !focusMode; document.body.classList.toggle('focus-mode', focusMode); $('focus').setAttribute('aria-pressed', String(focusMode)); }
   if (action === 'theme') { const light = document.body.classList.toggle('light'); $('theme').textContent = light ? 'Dark' : 'Light'; localStorage.setItem('beat-theme', light ? 'light' : 'dark'); }
 }
-for (const action of ['new', 'open', 'save', 'editable-copy']) $(action).addEventListener('click', async () => { await sync; await window.beat.action(action); });
+$('paper-size').addEventListener('change', () => { if (previewMode) refreshPreview(); });
+for (const action of ['new', 'open', 'save', 'editable-copy', 'export-pdf']) $(action).addEventListener('click', async () => { await sync; await window.beat.action(action); });
 for (const action of ['find', 'focus', 'theme', 'preview']) $(action).addEventListener('click', () => command(action));
 $('outline-filter').addEventListener('input', renderOutline);
 window.beat.onDocument(applyDocument);
@@ -171,6 +178,12 @@ window.beat.onAutomation(async request => {
     const text = view.state.doc.toString();
     let changed = false;
     if (['edit', 'undo', 'redo'].includes(request.command) && current.readOnly) throw new AutomationError('READ_ONLY', 'This document has protected BEAT metadata.', 409);
+    if (request.command === 'layout') {
+      await document.fonts.ready;
+      const layout = browserLayout(parsed, paperSize());
+      await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision }, result: { layout } });
+      return;
+    }
     if (request.command === 'edit') {
       const edits = validateEdits(text, request.params.edits);
       view.dispatch({ changes: edits.map(({ from, to, insert }) => ({ from, to, insert })), annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.codex')] });

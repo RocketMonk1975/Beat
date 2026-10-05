@@ -4,6 +4,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { decodeDocument, encodeDocument } = require('../dist/document.cjs');
 const { createProtection, atomicWrite } = require('./protection.cjs');
+const { printHTML } = require('../dist/pagination.cjs');
 const { createBridge } = require('./bridge.cjs');
 const { AutomationError, checkDocument, checkPosition, validateEdits, summary, documentSlice, findText, outline } = require('../dist/automation.cjs');
 
@@ -166,6 +167,7 @@ async function runAction(action) {
   busy = true;
   try {
     await flushRenderer();
+    if (action === 'export-pdf') return await exportPDF();
     if (action === 'recover') return await recover();
     if (action === 'backups') return await restoreBackup();
     if (action === 'save') return await save();
@@ -186,6 +188,29 @@ async function runAction(action) {
     await dialog.showMessageBox(win, { type: 'error', title: 'BEAT Windows', message: 'The operation could not be completed.', detail: error.message });
     return false;
   } finally { busy = false; }
+}
+
+async function exportPDF() {
+  const state = snapshot();
+  const result = await dialog.showSaveDialog(win, { title: 'Export screenplay PDF', defaultPath: state.name.replace(/\.(fountain|txt)$/i, '') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+  if (result.canceled || !result.filePath) return false;
+  const target = result.filePath.toLowerCase().endsWith('.pdf') ? result.filePath : result.filePath + '.pdf';
+  if (doc.filePath && path.resolve(target).toLowerCase() === path.resolve(doc.filePath).toLowerCase() || doc.protectedPaths.has(path.resolve(target).toLowerCase())) throw new Error('Choose a PDF destination different from the screenplay source.');
+  let previous; try { previous = await fs.readFile(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const response = await editorTask('layout', {}, state);
+  const html = printHTML(response.layout);
+  if (Buffer.byteLength(html) > 40 * 1024 * 1024) throw new Error('The PDF layout exceeds the preview export limit.');
+  let printWindow;
+  try {
+    printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
+    printWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    const pdf = await printWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { top: 0, bottom: 0, left: 0, right: 0 }, displayHeaderFooter: false });
+    await flushRenderer();
+    if (doc.id !== state.id || doc.revision !== state.revision) throw new Error('The screenplay changed during PDF export. Export again to use the latest text.');
+    await writeFileSafely(target, pdf, previous);
+    return true;
+  } finally { if (printWindow && !printWindow.isDestroyed()) printWindow.destroy(); }
 }
 
 async function choose(entries, title, label) {
@@ -235,11 +260,11 @@ app.whenReady().then(async () => {
   const file = (label, accelerator, action) => ({ label, accelerator, click: () => runAction(action) });
   const command = name => win.webContents.send('editor:command', name);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'File', submenu: [file('New', 'Ctrl+N', 'new'), file('Open…', 'Ctrl+O', 'open'), { type: 'separator' }, file('Save', 'Ctrl+S', 'save'), file('Save As…', 'Ctrl+Shift+S', 'save-as'), { type: 'separator' }, file('Create editable copy…', undefined, 'editable-copy'), { type: 'separator' }, { label: 'Exit', accelerator: 'Alt+F4', click: () => win.close() }] },
+    { label: 'File', submenu: [file('New', 'Ctrl+N', 'new'), file('Open…', 'Ctrl+O', 'open'), { type: 'separator' }, file('Save', 'Ctrl+S', 'save'), file('Save As…', 'Ctrl+Shift+S', 'save-as'), file('Export PDF…', 'Ctrl+Alt+P', 'export-pdf'), { type: 'separator' }, file('Create editable copy…', undefined, 'editable-copy'), { type: 'separator' }, { label: 'Exit', accelerator: 'Alt+F4', click: () => win.close() }] },
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Screenplay preview', accelerator: 'Ctrl+Shift+P', click: () => command('preview') }, { label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.4.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Pagination, PDF/FDX export, revisions and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.5.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX export, revisions and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {

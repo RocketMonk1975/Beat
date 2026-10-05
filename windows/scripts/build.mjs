@@ -4,6 +4,7 @@ await mkdir('dist', { recursive: true });
 await build({ entryPoints: ['src/renderer.ts'], bundle: true, outfile: 'dist/renderer.js', platform: 'browser', target: 'chrome140', sourcemap: true });
 await build({ entryPoints: ['src/document.ts'], bundle: true, outfile: 'dist/document.cjs', platform: 'node', format: 'cjs', target: 'node22' });
 await build({ entryPoints: ['src/automation.ts'], bundle: true, outfile: 'dist/automation.cjs', platform: 'node', format: 'cjs', target: 'node22' });
+await build({ entryPoints: ['src/pagination.ts'], bundle: true, outfile: 'dist/pagination.cjs', platform: 'node', format: 'cjs', target: 'node22' });
 await Promise.all(['index.html', 'style.css'].map(name => copyFile(`src/${name}`, `dist/${name}`)));
 await import('./notices.mjs');
 console.log('BEAT Windows built.');

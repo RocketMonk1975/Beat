@@ -108,3 +108,16 @@ body.focus-mode .file-actions,body.focus-mode .brand { opacity:.45; }
 .dual-column .element-dialogue { padding-left:0; padding-right:0; }
 .dual-column .element-parenthetical { padding-left:5%; padding-right:5%; }
 @media(max-width:1050px) { #preview-content { padding:42px 40px 100px; } .dual-dialogue { gap:1em; } }
+
+#preview-content { width:var(--page-width,612pt); max-width:none; padding:0; background:transparent; box-shadow:none; }
+#preview-pane { overflow:auto; }
+#preview-content .screenplay-page { position:relative; width:var(--page-width,612pt); height:var(--page-height,792pt); background:white; color:black; margin:0 auto 24px; box-shadow:var(--page-shadow); overflow:hidden; font:12pt/12pt 'Courier New',monospace; }
+#preview-content .row { position:absolute; white-space:pre; height:12pt; }
+#preview-content .page-number { position:absolute; right:72pt; top:36pt; }
+#preview-content .bold { font-weight:bold; }
+#preview-content .italic { font-style:italic; }
+#preview-content .underline { text-decoration:underline; }
+.preview-help { position:sticky; left:0; }
+.preview-help select { background:var(--surface); color:var(--text); border:1px solid var(--line); padding:4px; }
+
+#preview-content .uppercase { text-transform:uppercase; }

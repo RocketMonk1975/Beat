@@ -1,6 +1,6 @@
 # BEAT Windows preview
 
-Version 0.4.0 improves Fountain parsing and adds formatted screenplay preview. Recovery and backups are included from 0.3.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+Version 0.5.0 adds paginated preview and PDF export, building on the Fountain formatting improvements in 0.4.0. Recovery and backups are included from 0.3.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
 
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
@@ -35,7 +35,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Autocomplete, scene reordering, pagination, PDF/FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Autocomplete, scene reordering, FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -60,3 +60,12 @@ The Windows parser now uses blank-line context for headings and cues, accepts mi
 The editor styles bold, italic, underline and combined/nested emphasis while keeping every source character editable. Escaped markers and incomplete markup stay literal. Preview (View > Screenplay preview, Ctrl+Shift+P) displays continuous formatted text, omits comments and control markers, and places paired `^` dialogue blocks in two columns. Returning to editing keeps selection and undo history. The preview updates after local Codex edits; outline navigation returns to the source editor.
 
 This is a static-rule parity pass based on the native parser source checked into this repository, not a claim of complete parity with the running macOS app. See PARSER-PARITY.md for the comparison and remaining differences. The preview has no pagination or PDF export yet.
+
+
+### Pagination and PDF (0.5.0)
+
+Preview uses physical Letter (default) or A4 pages, 12-point Courier New, one-inch top/bottom/right margins and a 1.5-inch left margin. Dialogue and parenthetical columns have screenplay indents. Title-page fields appear separately; script numbering begins after the title page, with the first script page unnumbered. Explicit === breaks advance to the next page without printing the marker. Scene headings stay with following content. Split dialogue repeats its cue with (CONT'D) and adds (MORE); dual dialogue continues in independent columns.
+
+Choose paper size in Preview. File > Export PDF (Ctrl+Alt+P), or Preview's Export PDF button, uses that same measured layout. Export does not save the script or clear its recovery draft. Cancellation, storage errors and changes during export leave the screenplay untouched. Existing PDF destinations are checked before atomic replacement. The exporter runs in an isolated sandboxed window with JavaScript disabled.
+
+This is the first pagination implementation, not verified production parity with native macOS BEAT. Font fallback for non-Latin text depends on installed Windows fonts. Very long character cues use at most two rows in repeated continuation headers. Native revision marks, scene continuation numbering, customized print styles, headers/footers and FDX export remain future work. Inspect the PDF before production use.
