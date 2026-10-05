@@ -4,6 +4,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { decodeDocument, encodeDocument } = require('../dist/document.cjs');
 const { createProtection, atomicWrite } = require('./protection.cjs');
+const { importFDX, exportFDX } = require('../dist/fdx.cjs');
 const { printHTML } = require('../dist/pagination.cjs');
 const { createBridge } = require('./bridge.cjs');
 const { AutomationError, checkDocument, checkPosition, validateEdits, summary, documentSlice, findText, outline } = require('../dist/automation.cjs');
@@ -23,7 +24,7 @@ function createDocument(text = '', filePath = null) {
   return { id: randomUUID(), revision: 0, filePath, model, text: model.text, dirty: false, forceUnsaved: false,
     protectedPaths: new Set(), metadataPaths: new Set(model.metadata !== null && filePath ? [path.resolve(filePath).toLowerCase()] : []) };
 }
-function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : doc.recoveryName ? `Recovered — ${doc.recoveryName}` : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null, protection: protectionMessage }; }
+function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : doc.displayName ? doc.displayName : doc.recoveryName ? `Recovered — ${doc.recoveryName}` : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null, protection: protectionMessage }; }
 function status() {
   const state = snapshot();
   win.setTitle(`${state.dirty ? '• ' : ''}${state.name} — BEAT Windows`);
@@ -123,6 +124,7 @@ async function save(saveAs = false) {
     target = result.filePath;
     if (!path.extname(target)) target += '.fountain';
   }
+  if (path.extname(target).toLowerCase() === '.fdx') throw new Error('Save the script as Fountain; use File > Export Final Draft for FDX.');
   const content = encodeDocument(doc.model, doc.text);
   if (doc.protectedPaths.has(path.resolve(target).toLowerCase())) {
     throw new Error('Save the editable copy under a different filename to preserve the original BEAT document.');
@@ -160,13 +162,24 @@ async function openFile(filePath) {
   const buffer = await fs.readFile(filePath);
   new TextDecoder('utf-8', { fatal: true }).decode(buffer);
   // TextDecoder strips the BOM by default; Buffer preserves it for exact round trips.
-  doc = createDocument(buffer.toString('utf8'), filePath); publish();
+  if (path.extname(filePath).toLowerCase() === '.fdx') {
+    const converted = importFDX(buffer.toString('utf8'));
+    if (!await conversionWarning('Import Final Draft', converted.warnings)) return false;
+    const imported = createDocument(converted.text);
+    imported.protectedPaths.add(path.resolve(filePath).toLowerCase());
+    imported.displayName = `Imported — ${path.basename(filePath)}`;
+    imported.recoveryName = path.basename(filePath);
+    imported.forceUnsaved = imported.dirty = true;
+    protection.schedule(imported); await protection.flush(); doc = imported; publish(); return true;
+  }
+  doc = createDocument(buffer.toString('utf8'), filePath); publish(); return true;
 }
 async function runAction(action) {
   if (busy) return false;
   busy = true;
   try {
     await flushRenderer();
+    if (action === 'export-fdx') return await exportFinalDraft();
     if (action === 'export-pdf') return await exportPDF();
     if (action === 'recover') return await recover();
     if (action === 'backups') return await restoreBackup();
@@ -175,8 +188,8 @@ async function runAction(action) {
     if (action === 'new') { if (await mayDiscard()) { doc = createDocument(); publish(); return true; } }
     if (action === 'open') {
       if (!await mayDiscard()) return false;
-      const result = await dialog.showOpenDialog(win, { title: 'Open screenplay', properties: ['openFile'], filters: [{ name: 'Screenplays', extensions: ['fountain', 'txt'] }, { name: 'All files', extensions: ['*'] }] });
-      if (!result.canceled && result.filePaths[0]) { await openFile(result.filePaths[0]); return true; }
+      const result = await dialog.showOpenDialog(win, { title: 'Open screenplay', properties: ['openFile'], filters: [{ name: 'Screenplays', extensions: ['fountain', 'txt', 'fdx'] }, { name: 'All files', extensions: ['*'] }] });
+      if (!result.canceled && result.filePaths[0]) { return await openFile(result.filePaths[0]); }
     }
     if (action === 'editable-copy') {
       if (doc.model.metadata === null) return false;
@@ -188,6 +201,25 @@ async function runAction(action) {
     await dialog.showMessageBox(win, { type: 'error', title: 'BEAT Windows', message: 'The operation could not be completed.', detail: error.message });
     return false;
   } finally { busy = false; }
+}
+
+async function conversionWarning(title, warnings) {
+  if (!warnings.length) return true;
+  const result = await dialog.showMessageBox(win, { type: 'warning', title, message: 'This conversion does not retain every format feature.', detail: warnings.join('\n'), buttons: ['Continue conversion', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true });
+  return result.response === 0;
+}
+async function exportFinalDraft() {
+  const state = snapshot(), converted = exportFDX(state.text);
+  if (doc.model.metadata !== null) converted.warnings.push('BEAT settings, tags and revision metadata are not exported.');
+  if (!await conversionWarning('Export Final Draft', converted.warnings)) return false;
+  const result = await dialog.showSaveDialog(win, { title: 'Export Final Draft screenplay', defaultPath: state.name.replace(/\.(fountain|txt|fdx)$/i, '') + '.fdx', filters: [{ name: 'Final Draft screenplay', extensions: ['fdx'] }] });
+  if (result.canceled || !result.filePath) return false;
+  const target = result.filePath.toLowerCase().endsWith('.fdx') ? result.filePath : result.filePath + '.fdx';
+  if (doc.filePath && path.resolve(target).toLowerCase() === path.resolve(doc.filePath).toLowerCase() || doc.protectedPaths.has(path.resolve(target).toLowerCase())) throw new Error('Choose an FDX destination different from the original source.');
+  let previous; try { previous = await fs.readFile(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await flushRenderer();
+  if (doc.id !== state.id || doc.revision !== state.revision) throw new Error('The screenplay changed during FDX export. Export again using the latest text.');
+  await writeFileSafely(target, converted.text, previous); return true;
 }
 
 async function exportPDF() {
@@ -260,11 +292,11 @@ app.whenReady().then(async () => {
   const file = (label, accelerator, action) => ({ label, accelerator, click: () => runAction(action) });
   const command = name => win.webContents.send('editor:command', name);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'File', submenu: [file('New', 'Ctrl+N', 'new'), file('Open…', 'Ctrl+O', 'open'), { type: 'separator' }, file('Save', 'Ctrl+S', 'save'), file('Save As…', 'Ctrl+Shift+S', 'save-as'), file('Export PDF…', 'Ctrl+Alt+P', 'export-pdf'), { type: 'separator' }, file('Create editable copy…', undefined, 'editable-copy'), { type: 'separator' }, { label: 'Exit', accelerator: 'Alt+F4', click: () => win.close() }] },
+    { label: 'File', submenu: [file('New', 'Ctrl+N', 'new'), file('Open…', 'Ctrl+O', 'open'), { type: 'separator' }, file('Save', 'Ctrl+S', 'save'), file('Save As…', 'Ctrl+Shift+S', 'save-as'), file('Export PDF…', 'Ctrl+Alt+P', 'export-pdf'), file('Export Final Draft…', undefined, 'export-fdx'), { type: 'separator' }, file('Recover unsaved screenplay…', undefined, 'recover'), file('Restore versioned backup…', undefined, 'backups'), file('Create editable copy…', undefined, 'editable-copy'), { type: 'separator' }, { label: 'Exit', accelerator: 'Alt+F4', click: () => win.close() }] },
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Screenplay preview', accelerator: 'Ctrl+Shift+P', click: () => command('preview') }, { label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.6.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX export, revisions and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.7.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revisions and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {
@@ -305,7 +337,7 @@ app.whenReady().then(async () => {
     finally { busy = false; }
   });
   await win.loadFile(path.join(__dirname, '../dist/index.html'));
-  const argument = process.argv.slice(app.isPackaged ? 1 : 2).find(value => !value.startsWith('-') && /\.(fountain|txt)$/i.test(value));
+  const argument = process.argv.slice(app.isPackaged ? 1 : 2).find(value => !value.startsWith('-') && /\.(fountain|txt|fdx)$/i.test(value));
   if (argument) { try { await openFile(path.resolve(argument)); } catch (error) { await dialog.showMessageBox(win, { type: 'error', message: error.message }); } }
   status();
   if (process.env.BEAT_SMOKE_TEST !== '1') { try { const pending = await protection.list(); if (pending.records.length || pending.invalid.length) await recover(); } catch (error) { protectionMessage = `Recovery error: ${error.message}`; status(); } }

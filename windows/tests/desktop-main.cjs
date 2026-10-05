@@ -312,8 +312,27 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     await js("document.getElementById('outline-filter').value='';document.getElementById('outline-filter').dispatchEvent(new Event('input'))");
     check('outline scene moves preserve content, update selection, undo/redo together and disable while filtered');
     answer=1; await runAction('new');
+    const fileMenu = require('electron').Menu.getApplicationMenu().items.find(item=>item.label==='File').submenu.items.map(item=>item.label);
+    assert.ok(fileMenu.includes('Export Final Draft…') && fileMenu.includes('Recover unsaved screenplay…') && fileMenu.includes('Restore versioned backup…'));
+    const fdxSource='INT. FDX ROOM - DAY #12A#\n\n!A **bold** action.\n\n@JANE\nHello.\n\n@JOHN ^\nReply.\n';
+    await edit(fdxSource);
+    nextSave=null; assert.equal(await runAction('export-fdx'),false); assert.equal(snapshot().text,fdxSource);
+    nextSave=path.join(root,'screenplay.fdx'); assert.equal(await runAction('export-fdx'),true);
+    const exportedFDX=await fs.readFile(nextSave,'utf8'); assert.ok(exportedFDX.includes('<FinalDraft') && exportedFDX.includes('<DualDialogue>'));
+    assert.equal(snapshot().dirty,true); const importedSource=nextSave;
+    answer=1; await runAction('new'); nextOpen=importedSource;
+    assert.equal(await runAction('open'),true);
+    await waitFor("document.getElementById('filename').textContent.includes('Imported')",'FDX import copy');
+    assert.equal(snapshot().path,null); assert.equal(snapshot().dirty,true); assert.ok(snapshot().text.includes('#12A#'));
+    nextSave=importedSource; assert.equal(await runAction('export-fdx'),false); assert.match(errors.pop(),/original source/);
+    assert.equal(await fs.readFile(importedSource,'utf8'),exportedFDX);
+    nextSave=path.join(root,'imported-copy.fountain'); assert.equal(await runAction('save'),true);
+    assert.ok((await fs.readFile(nextSave,'utf8')).includes('@JOHN ^'));
+    const malformed=path.join(root,'malformed.fdx');await fs.writeFile(malformed,'<FinalDraft><Content></FinalDraft>');nextOpen=malformed;
+    const beforeBadImport=snapshot().id; assert.equal(await runAction('open'),false); assert.equal(snapshot().id,beforeBadImport); assert.ok(errors.pop());
+    check('FDX export and unsaved-copy import preserve styles, scene numbers and dual dialogue; source overwrite and malformed import are blocked');
     assert.deepEqual(errors, []);
-    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.6.0', passed: checks.length, checks, errors }, null, 2));
+    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.7.0', passed: checks.length, checks, errors }, null, 2));
     console.log(`DESKTOP TESTS PASSED: ${checks.length}`);
     await setConnection(false); app.exit(0);
   } catch (error) {

@@ -35,7 +35,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. FDX export, revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. revisions, tags, plugin compatibility are not implemented. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -76,3 +76,14 @@ This is the first pagination implementation, not verified production parity with
 Character names already used in the current script appear as suggestions when typing an uppercase cue or an @-forced cue after a blank line. Ctrl+Space also opens suggestions on a blank cue line. Arrow keys select, Tab accepts, Escape dismisses, and clicking accepts. Cue extensions such as (V.O.) and dual-dialogue ^ markers remain intact. Suggestions never replace text without acceptance and are disabled for protected documents.
 
 Select a scene in the outline, then use Move up or Move down. The scene's heading, synopsis, comments and body move together with one undo step. Explicit scene numbers stay with their scene; automatic numbers follow the new order. Title pages and section headings stay in place. Moves cannot cross a section and are disabled while the outline is filtered or the document is read-only. An EOF scene lacking a final blank separator gets one when needed to keep headings distinct. Moves remain unsaved and receive normal recovery checkpoints.
+
+
+### Final Draft exchange (0.7.0)
+
+File > Open accepts .fdx files and creates visibly unsaved Fountain copies. Their original FDX paths are protected from Save and Export overwrites; save the imported screenplay under a new Fountain filename. Imported drafts receive normal recovery checkpoints. File > Export Final Draft writes a separate .fdx without saving the source script or clearing its recovery draft. Cancelling either conversion leaves the current document intact.
+
+The converter supports scene headings and numbers, action, character cues, dialogue, parentheticals, transitions, shots, lyrics, centered text, bold/italic/underline text runs and dual dialogue. Title-page text is preserved; its original placement and field labels are not round-tripped. Sections and synopsis are exported as action text. Final Draft repaginates; Fountain page-break directives and notes are not exported. Revisions, tags, script notes, scene colors, custom fonts and unsupported paragraph features produce conversion warnings. The original FDX is retained for those features.
+
+XML is parsed locally with DTD/entity declarations disabled, strict error reporting and bounded size/depth. Exports escape XML text and validate text characters. Existing destinations are checked before atomic replacement; edits made while an export dialog is open cancel export rather than writing stale text.
+
+Validation covers the repository's native FDX structure and Windows round trips. Opening these exports in an installed Final Draft application remains an external interoperability check; no complete fidelity with Final Draft's production metadata or print layout is claimed.
