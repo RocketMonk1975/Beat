@@ -1,6 +1,6 @@
 {
   "name": "beat-windows",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "An early Windows port of BEAT's Fountain writing workflow",
   "license": "GPL-3.0-or-later",

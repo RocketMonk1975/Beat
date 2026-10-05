@@ -4,7 +4,7 @@ import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWit
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 import { parseFountain, type ParsedScript } from './fountain';
 import { AutomationError, checkPosition, validateEdits, type TextEdit } from './automation';
-interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; }
+interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; protection: string; }
 interface ConnectionState { enabled: boolean; lastAction: string; error: string; }
 interface AutomationRequest { requestId: string; deadline: number; documentId: string; revision: number; command: string; params: { from?: number; to?: number; edits?: TextEdit[] }; }
 declare global { interface Window { beat: {
@@ -80,6 +80,8 @@ function applyDocument(doc: DocumentState) {
 function setStatus(doc: DocumentState) {
   if (current && doc.id !== current.id) return;
   if (current) { current.name = doc.name; current.dirty = doc.dirty; current.path = doc.path; }
+  $('save-state').title = doc.protection;
+  $('protection-state').textContent = doc.protection;
   $('filename').textContent = doc.name;
   $('filename').title = doc.path ?? 'New screenplay';
   $('save-state').textContent = doc.readOnly ? 'Read-only · metadata preserved' : doc.dirty ? 'Unsaved changes' : doc.path ? 'All changes saved' : 'Ready to write';

@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { decodeDocument, encodeDocument } = require('../dist/document.cjs');
+const { createProtection, atomicWrite } = require('./protection.cjs');
 const { createBridge } = require('./bridge.cjs');
 const { AutomationError, checkDocument, checkPosition, validateEdits, summary, documentSlice, findText, outline } = require('../dist/automation.cjs');
 
@@ -11,6 +12,8 @@ app.setName('BEAT Windows');
 let win, doc, busy = false, allowClose = false;
 const flushes = new Map();
 const editorRequests = new Map();
+let protectionMessage = 'Automatic recovery ready';
+const protection = createProtection(path.join(app.getPath('userData'), 'protection'), { activeSession: true, onCheckpoint: timestamp => { protectionMessage = `Recovery checkpoint · ${new Date(timestamp).toLocaleTimeString()}`; if (win && !win.isDestroyed()) status(); }, onError: error => { protectionMessage = `Recovery/backup error: ${error.message}`; if (win && !win.isDestroyed()) status(); } });
 let bridge = null, connectionError = '', lastAutomation = '', bridgeTransitions = Promise.resolve(), bridgeClosing = false;
 const connectionFile = process.env.BEAT_BRIDGE_FILE ?? (app.isPackaged ? path.join(app.getPath('userData'), 'codex-bridge.json') : path.resolve(__dirname, '../../../work/codex-bridge.json'));
 const welcome = 'Title: A new story\nAuthor: Your name\n\n# Act One\n\nINT. WRITING ROOM - DAY\n\nA blank page. A little courage. The beginning of something.\n\nWRITER\nEvery story starts somewhere.\n\nEXT. CITY STREET - EVENING\n\nThe world keeps moving.\n';
@@ -19,7 +22,7 @@ function createDocument(text = '', filePath = null) {
   return { id: randomUUID(), revision: 0, filePath, model, text: model.text, dirty: false, forceUnsaved: false,
     protectedPaths: new Set(), metadataPaths: new Set(model.metadata !== null && filePath ? [path.resolve(filePath).toLowerCase()] : []) };
 }
-function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null }; }
+function snapshot() { return { id: doc.id, revision: doc.revision, path: doc.filePath, name: doc.filePath ? path.basename(doc.filePath) : doc.recoveryName ? `Recovered — ${doc.recoveryName}` : 'Untitled.fountain', text: doc.text, dirty: doc.dirty, readOnly: doc.model.metadata !== null, protection: protectionMessage }; }
 function status() {
   const state = snapshot();
   win.setTitle(`${state.dirty ? '• ' : ''}${state.name} — BEAT Windows`);
@@ -36,7 +39,7 @@ function applyUpdate(update) {
   if (doc.model.metadata !== null && update.text !== doc.model.text) return false;
   if (update.revision < doc.revision) return true;
   if (update.revision === doc.revision && update.text !== doc.text) return false;
-  doc.text = update.text; doc.revision = update.revision; doc.dirty = doc.text !== doc.model.text || doc.forceUnsaved; status(); return true;
+  doc.text = update.text; doc.revision = update.revision; doc.dirty = doc.text !== doc.model.text || doc.forceUnsaved; protection.schedule(doc); status(); return true;
 }
 function connectionStatus() { return { enabled: bridge !== null, lastAction: lastAutomation, error: connectionError }; }
 function publishConnection() { if (win && !win.isDestroyed()) win.webContents.send('automation:status', connectionStatus()); }
@@ -104,10 +107,12 @@ function flushRenderer() {
     win.webContents.send('document:flush', token);
   });
 }
-async function writeFileSafely(filePath, content) {
-  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`);
-  try { await fs.writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' }); await fs.rename(temporary, filePath); }
-  finally { await fs.unlink(temporary).catch(() => {}); }
+async function writeFileSafely(filePath, content, previous) {
+  await atomicWrite(filePath, content, async () => {
+    let bytes;
+    try { bytes = await fs.readFile(filePath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (previous ? !bytes || !bytes.equals(previous) : bytes !== undefined) throw new Error('The destination changed outside BEAT. Use Save As to preserve your edits.');
+  });
 }
 async function save(saveAs = false) {
   let target = doc.filePath;
@@ -124,19 +129,29 @@ async function save(saveAs = false) {
   if (doc.filePath && path.resolve(target).toLowerCase() === path.resolve(doc.filePath).toLowerCase()) {
     let disk;
     try { disk = await fs.readFile(target, 'utf8'); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    catch (error) { if (error.code === 'ENOENT') throw new Error('The source file was removed outside BEAT. Use Save As.'); throw error; }
     if (disk !== undefined && disk !== doc.model.original) throw new Error('This file changed outside BEAT. Use Save As to keep your edits in another file.');
   }
-  await writeFileSafely(target, content);
+  let previous;
+  try { previous = await fs.readFile(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (previous) {
+    await protection.backup(target, previous);
+    const currentBytes = await fs.readFile(target);
+    if (!currentBytes.equals(previous)) throw new Error('This file changed while preparing its backup. Save As to preserve your edits.');
+  }
+  await writeFileSafely(target, content, previous);
   doc.filePath = target; doc.model = decodeDocument(content); doc.dirty = false; doc.forceUnsaved = false;
   if (doc.model.metadata !== null) doc.metadataPaths.add(path.resolve(target).toLowerCase());
+  await protection.clear(doc);
+  protectionMessage = 'Saved · previous version backed up';
   status();
   return true;
 }
 async function mayDiscard() {
   if (!doc.dirty) return true;
   const result = await dialog.showMessageBox(win, { type: 'question', title: 'Unsaved screenplay', message: 'Save your changes before continuing?', detail: snapshot().name, buttons: ['Save', 'Discard changes', 'Cancel'], defaultId: 0, cancelId: 2, noLink: true });
-  return result.response === 1 || (result.response === 0 && await save());
+  if (result.response === 1) { await protection.clear(doc); return true; }
+  return (result.response === 0 && await save());
 }
 async function openFile(filePath) {
   const info = await fs.stat(filePath);
@@ -151,6 +166,8 @@ async function runAction(action) {
   busy = true;
   try {
     await flushRenderer();
+    if (action === 'recover') return await recover();
+    if (action === 'backups') return await restoreBackup();
     if (action === 'save') return await save();
     if (action === 'save-as') return await save(true);
     if (action === 'new') { if (await mayDiscard()) { doc = createDocument(); publish(); return true; } }
@@ -162,13 +179,50 @@ async function runAction(action) {
     if (action === 'editable-copy') {
       if (doc.model.metadata === null) return false;
       const answer = await dialog.showMessageBox(win, { type: 'question', title: 'Create editable copy', message: 'Create a new script containing the Fountain text?', detail: 'The copy omits BEAT settings, revisions, tags, and plugin metadata. Your original file remains intact. Save the copy under a new filename.', buttons: ['Create copy', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true });
-      if (answer.response === 0) { const originals = doc.metadataPaths; doc = createDocument(doc.text); doc.protectedPaths = new Set(originals); doc.forceUnsaved = true; doc.dirty = true; publish(); return true; }
+      if (answer.response === 0) { const originals = doc.metadataPaths; doc = createDocument(doc.text); doc.protectedPaths = new Set(originals); doc.forceUnsaved = true; doc.dirty = true; protection.schedule(doc); publish(); return true; }
     }
     return false;
   } catch (error) {
     await dialog.showMessageBox(win, { type: 'error', title: 'BEAT Windows', message: 'The operation could not be completed.', detail: error.message });
     return false;
   } finally { busy = false; }
+}
+
+async function choose(entries, title, label) {
+  for (let offset = 0; offset < entries.length; offset += 8) {
+    const page = entries.slice(offset, offset + 8);
+    const more = offset + 8 < entries.length;
+    const buttons = [...page.map(label), ...(more ? ['More…'] : []), 'Cancel'];
+    const answer = await dialog.showMessageBox(win, { title, message: title, detail: 'Select a version to restore as an unsaved copy. Original files remain protected.', buttons, cancelId: buttons.length - 1, defaultId: buttons.length - 1, noLink: true });
+    if (answer.response < page.length) return page[answer.response];
+    if (!more || answer.response !== page.length) return null;
+  }
+  await dialog.showMessageBox(win, { title, message: 'No saved versions are available.' });
+  return null;
+}
+async function recover() {
+  const found = await protection.list({ excludeId: doc.id });
+  if (found.invalid.length) await dialog.showMessageBox(win, { type: 'warning', title: 'Recovery storage', message: `${found.invalid.length} damaged recovery entries were retained for inspection.`, detail: protection.recoveryRoot });
+  if (found.records.length > 100) await dialog.showMessageBox(win, { type: 'warning', title: 'Recovery storage', message: 'More than 100 unresolved drafts are retained.', detail: 'Recover and save or explicitly discard old drafts to reduce storage. Unresolved drafts are never removed automatically.' });
+  const entry = await choose(found.records, 'Recover unsaved screenplay', item => `${item.record.sourcePath ? path.basename(item.record.sourcePath) : 'Untitled'} · ${new Date(item.record.updatedAt).toLocaleString()}`);
+  if (!entry || !await mayDiscard()) return false;
+  const record = entry.record;
+  const restored = createDocument(record.original);
+  restored.recoveryName = record.name ?? (record.sourcePath ? path.basename(record.sourcePath) : 'Untitled.fountain');
+  if (restored.model.metadata !== null && record.text !== restored.model.text) throw new Error('Recovery text conflicts with protected BEAT metadata. The draft was retained for inspection.');
+  restored.text = record.text; restored.recoverySource = entry.key;
+  restored.protectedPaths = new Set([...record.protectedPaths, ...(record.sourcePath ? [path.resolve(record.sourcePath).toLowerCase()] : [])]);
+  restored.forceUnsaved = restored.dirty = true;
+  protection.schedule(restored); await protection.flush(); doc = restored; publish(); return true;
+}
+async function restoreBackup() {
+  const entry = await choose(await protection.backups(), 'Restore versioned backup', item => `${path.basename(item.sourcePath)} · ${new Date(item.createdAt).toLocaleString()}`);
+  if (!entry || !await mayDiscard()) return false;
+  const restored = createDocument(await fs.readFile(entry.filePath, 'utf8'));
+  restored.recoveryName = path.basename(entry.sourcePath);
+  restored.protectedPaths.add(path.resolve(entry.sourcePath).toLowerCase());
+  restored.forceUnsaved = restored.dirty = true;
+  protection.schedule(restored); await protection.flush(); doc = restored; publish(); return true;
 }
 
 app.whenReady().then(async () => {
@@ -185,7 +239,7 @@ app.whenReady().then(async () => {
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.2.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Pagination, PDF/FDX export, revisions and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.3.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Pagination, PDF/FDX export, revisions and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {
@@ -229,12 +283,13 @@ app.whenReady().then(async () => {
   const argument = process.argv.slice(app.isPackaged ? 1 : 2).find(value => !value.startsWith('-') && /\.(fountain|txt)$/i.test(value));
   if (argument) { try { await openFile(path.resolve(argument)); } catch (error) { await dialog.showMessageBox(win, { type: 'error', message: error.message }); } }
   status();
+  if (process.env.BEAT_SMOKE_TEST !== '1') { try { const pending = await protection.list(); if (pending.records.length || pending.invalid.length) await recover(); } catch (error) { protectionMessage = `Recovery error: ${error.message}`; status(); } }
   await setConnection(true);
   if (!app.isPackaged && process.env.BEAT_SMOKE_TEST === '1') {
-    require('../tests/desktop-main.cjs')({ app, win, dialog, snapshot, runAction, openFile, automate, setConnection, connectionFile });
+    require('../tests/desktop-main.cjs')({ app, win, dialog, snapshot, runAction, openFile, automate, setConnection, connectionFile, protection });
   } else win.show();
 });
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => { protection.dispose(); app.quit(); });
 app.on('before-quit', event => {
   if (!bridge || bridgeClosing) return;
   event.preventDefault(); bridgeClosing = true;

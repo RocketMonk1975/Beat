@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-module.exports = async function ({ app, win, dialog, snapshot, runAction, openFile, setConnection, connectionFile }) {
+module.exports = async function ({ app, win, dialog, snapshot, runAction, openFile, setConnection, connectionFile, protection }) {
   const root = path.resolve('work/desktop-test');
   const errors = [], checks = [];
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
@@ -203,8 +203,40 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     await js("document.getElementById('theme').click()");
     await new Promise(resolve => setTimeout(resolve, 100));
     await fs.writeFile(path.join(root, 'desktop-light.png'), (await win.capturePage()).toPNG());
+    const { createProtection } = require('../electron/protection.cjs');
+    const { randomUUID } = require('node:crypto');
+    const crashed = createProtection(protection.root);
+    const recoverySource = path.join(root, 'recovery-original.fountain');
+    const recoveryBytes = '\uFEFFINT. RECOVERY - DAY\r\n\r\nOriginal.\r\n';
+    await fs.writeFile(recoverySource, recoveryBytes);
+    const draft = { id: randomUUID(), filePath: recoverySource, model: { original: recoveryBytes }, text: 'INT. RECOVERY - DAY\n\nRecovered edit.\n', dirty: true, protectedPaths: new Set() };
+    crashed.schedule(draft); await crashed.flush();
+    answer = 0; assert.equal(await runAction('recover'), true);
+    assert.equal(snapshot().path, null); assert.equal(snapshot().dirty, true);
+    assert.match(snapshot().name, /Recovered/); assert.equal(snapshot().text, draft.text);
+    nextSave = null; assert.equal(await runAction('save-as'), false);
+    assert.ok((await protection.list()).records.length >= 1);
+    nextSave = recoverySource; assert.equal(await runAction('save'), false);
+    assert.match(errors.pop(), /different filename/);
+    assert.equal(await fs.readFile(recoverySource, 'utf8'), recoveryBytes);
+    nextSave = path.join(root, 'recovered-copy.fountain'); assert.equal(await runAction('save'), true);
+    assert.equal(await fs.readFile(nextSave, 'utf8'), '\uFEFF' + draft.text.replaceAll('\n', '\r\n'));
+    assert.equal((await protection.list()).records.some(item => item.record.id === draft.id), false);
+    check('restart recovery stays unsaved, survives cancellation, protects source and preserves BOM/newlines');
+    await edit('INT. BACKUP - DAY\n\nNew version.\n');
+    const oldBytes = await fs.readFile(nextSave); assert.equal(await runAction('save'), true);
+    const history = await protection.backups();
+    const version = history.find(entry => entry.sourcePath === path.resolve(nextSave));
+    assert.ok(version); assert.deepEqual(await fs.readFile(version.filePath), oldBytes);
+    answer = 0; assert.equal(await runAction('backups'), true);
+    assert.equal(snapshot().dirty, true); assert.equal(snapshot().path, null);
+    assert.equal(snapshot().text, draft.text);
+    nextSave = version.sourcePath; assert.equal(await runAction('save'), false);
+    assert.match(errors.pop(), /different filename/);
+    check('backups retain exact bytes and restore as protected unsaved copies');
+    answer = 1; await runAction('new');
     assert.deepEqual(errors, []);
-    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.2.0', passed: checks.length, checks, errors }, null, 2));
+    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.3.0', passed: checks.length, checks, errors }, null, 2));
     console.log(`DESKTOP TESTS PASSED: ${checks.length}`);
     await setConnection(false); app.exit(0);
   } catch (error) {
