@@ -1,3 +1,6 @@
+import { moveSceneMetadata } from './scene-metadata';
+import { replaceAnnotation, tagTypes, type Annotations } from './annotations';
+import { resolveRevisions } from './revision-workflow';
 import { revisionExtensions, revisionField, setRevisions, markRevision, type Revisions } from './revisions';
 import { EditorState, Compartment, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, drawSelection, highlightActiveLine, type DecorationSet, type ViewUpdate } from '@codemirror/view';
@@ -5,7 +8,7 @@ import { history, historyKeymap, defaultKeymap, undo, redo, selectAll, indentWit
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 import { characterSuggestions, sceneMove, type CharacterMatch } from './writing-tools';
 import { browserLayout, renderPreview } from './preview';
-import type { PaperSize } from './pagination';
+import type { PaperSize, PrintOptions } from './pagination';
 import { parseFountain, type ParsedScript } from './fountain';
 import { AutomationError, checkPosition, validateEdits, type TextEdit } from './automation';
 interface DocumentState { id: string; revision: number; path: string | null; name: string; text: string; dirty: boolean; readOnly: boolean; revisions: Revisions; protection: string; }
@@ -31,8 +34,9 @@ let loading = false;
 let focusMode = false;
 let previewMode = false;
 const paperSize = () => $<HTMLSelectElement>('paper-size').value as PaperSize;
+function printOptions(): PrintOptions { return { header: $<HTMLInputElement>('print-header').value, footer: $<HTMLInputElement>('print-footer').value, sceneNumbers: $<HTMLInputElement>('print-scenes').checked, sceneContinuations: $<HTMLInputElement>('print-continuations').checked, revisionMarks: $<HTMLInputElement>('print-revisions').checked, revisions: view.state.field(revisionField).ranges }; }
 function refreshPreview() {
-  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier${view.state.field(revisionField).annotations ? " · Tags/reviews omitted" : ""}${view.state.field(revisionField).ranges.length ? " · Revision marks omitted from preview/PDF" : ""}`; }
+  try { const layout = renderPreview(parsed, $('preview-content'), paperSize(), printOptions()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier${view.state.field(revisionField).annotations ? " · Tags/reviews omitted" : ""}${view.state.field(revisionField).ranges.length && !$<HTMLInputElement>('print-revisions').checked ? " · Revision marks omitted from preview/PDF" : ""}`; }
   catch (error) { $('preview-content').replaceChildren(); $('preview-summary').textContent = `Preview unavailable: ${(error as Error).message}`; }
 }
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -96,7 +100,7 @@ const view = new EditorView({ parent: $('editor'), state: EditorState.create({ d
     if ((update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(setRevisions)))) && current && !loading) {
       const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
       const revisions = update.state.field(revisionField);
-      refreshRevisionControls(revisions);
+      refreshRevisionControls(revisions); refreshAnnotationControls(revisions); if (previewMode) refreshPreview();
       sync = sync.then(() => window.beat.update(id, text, revision, revisions)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
       clearTimeout(outlineTimer); outlineTimer = setTimeout(renderOutline, 120);
     }
@@ -107,6 +111,8 @@ const view = new EditorView({ parent: $('editor'), state: EditorState.create({ d
 function applyDocument(doc: DocumentState) {
   if (current) hideCompletion();
   current = doc; editorRevision = doc.revision; loading = true;
+  $<HTMLInputElement>('tag-name').value = ''; $<HTMLTextAreaElement>('review-text').value = '';
+  $<HTMLSelectElement>('tag-list').value = ''; $<HTMLSelectElement>('review-list').value = '';
   // A fresh state resets undo history so edits cannot cross document boundaries.
   const state = EditorState.create({ doc: doc.text, selection: { anchor: doc.revisions.annotations?.caret ?? 0 }, extensions: [
     history(), revisionExtensions(doc.revisions), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
@@ -117,7 +123,7 @@ function applyDocument(doc: DocumentState) {
       if ((update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(setRevisions)))) && !loading) {
         const id = current.id, text = update.state.doc.toString(), revision = ++editorRevision;
         const revisions = update.state.field(revisionField);
-      refreshRevisionControls(revisions);
+      refreshRevisionControls(revisions); refreshAnnotationControls(revisions); if (previewMode) refreshPreview();
       sync = sync.then(() => window.beat.update(id, text, revision, revisions)).catch(error => { $('save-state').textContent = `Sync failed: ${error.message}`; });
         clearTimeout(outlineTimer); outlineTimer = setTimeout(renderOutline, 120);
       }
@@ -130,7 +136,7 @@ function applyDocument(doc: DocumentState) {
   $('metadata-banner').hidden = !doc.readOnly;
   $('mode-label').textContent = doc.readOnly ? 'BEAT metadata protected · read-only' : 'Fountain · live formatting';
   $('file-mode').textContent = doc.readOnly ? 'PROTECTED DOCUMENT' : 'LOCAL DOCUMENT';
-  refreshRevisionControls(doc.revisions); setStatus(doc); renderOutline(); updateCursor(); if (!previewMode) view.focus();
+  refreshRevisionControls(doc.revisions); refreshAnnotationControls(doc.revisions); setStatus(doc); renderOutline(); updateCursor(); if (!previewMode) view.focus();
 }
 function setStatus(doc: DocumentState) {
   if (current && doc.id !== current.id) return;
@@ -166,14 +172,14 @@ function renderOutline() {
 }
 function moveCurrentScene(direction: -1 | 1) {
   hideCompletion();
-  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).annotations || view.state.field(revisionField).headings || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
+  if (current.readOnly || $<HTMLInputElement>('outline-filter').value.trim()) return;
   const text = view.state.doc.toString(), active = [...parsed.outline].reverse().find(item => item.from <= view.state.selection.main.head);
   if (active?.type !== 'scene') return;
   try {
     const edit = sceneMove(text, active.from, direction);
     if (view.state.doc.sliceString(edit.from, edit.to) !== edit.expectedText) throw new Error('The scene changed. Select it again.');
     if (previewMode) setPreview(false);
-    view.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert }, selection: { anchor: edit.anchor }, annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.move-scene')] });
+    view.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert }, selection: { anchor: edit.anchor }, effects: setRevisions.of(moveSceneMetadata(view.state.field(revisionField), edit, text.length)), annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.move-scene')] });
     clearTimeout(outlineTimer); renderOutline(); view.focus(); $('writing-status').textContent = 'Scene moved. Ctrl+Z to undo.';
   } catch (error) { $('writing-status').textContent = (error as Error).message; }
 }
@@ -184,7 +190,7 @@ function updateCursor() {
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
   const activeIndex = parsed.outline.indexOf(active!);
   for (const [id, direction] of [['scene-up', -1], ['scene-down', 1]] as const) {
-    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).annotations || !!view.state.field(revisionField).headings || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
+    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
   }
   if (!loading) showCompletion();
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));
@@ -242,7 +248,7 @@ window.beat.onAutomation(async request => {
     if (['edit', 'undo', 'redo'].includes(request.command) && current.readOnly) throw new AutomationError('READ_ONLY', 'This document has protected BEAT metadata.', 409);
     if (request.command === 'layout') {
       await document.fonts.ready;
-      const layout = browserLayout(parsed, paperSize());
+      const layout = browserLayout(parsed, paperSize(), printOptions());
       await window.beat.automationResponse({ requestId: request.requestId, state: { id: current.id, text: view.state.doc.toString(), revision: editorRevision, revisions: view.state.field(revisionField) }, result: { layout } });
       return;
     }
@@ -273,7 +279,7 @@ window.beat.current().then(applyDocument).catch(error => { $('save-state').textC
 function refreshRevisionControls(value: Revisions) {
   $<HTMLInputElement>('revision-track').checked = value.enabled;
   $<HTMLSelectElement>('revision-generation').value = String(value.generation);
-  for (const id of ['revision-track', 'revision-generation', 'revision-add', 'revision-remove', 'revision-clear']) ($<HTMLButtonElement>(id)).disabled = current?.readOnly ?? true;
+  for (const id of ['revision-track', 'revision-generation', 'revision-add', 'revision-remove', 'revision-clear', 'revision-accept', 'revision-reject']) ($<HTMLButtonElement>(id)).disabled = current?.readOnly ?? true;
   $('revision-summary').textContent = `${value.ranges.length} revision ranges${value.annotations ? ` · ${value.annotations.tags.length} tags · ${value.annotations.reviews.length} reviews preserved` : ""} · deletions erase text; mark suggested removals before deleting`;
 }
 function changeRevisions(value: Revisions) {
@@ -288,3 +294,89 @@ for (const [id, kind] of [['revision-add', 'Addition'], ['revision-remove', 'Rem
   if (to <= from) { $('revision-summary').textContent = 'Select text to mark or clear a revision.'; return; }
   changeRevisions(markRevision(view.state.field(revisionField), from, to, kind));
 });
+
+const annotationValue = (value: Revisions): Annotations => value.annotations ?? { tags: [], reviews: [] };
+function refreshAnnotationControls(value: Revisions) {
+  const tags = $<HTMLSelectElement>('tag-list'), selected = tags.value;
+  tags.replaceChildren(new Option('New tag', ''));
+  for (const d of value.definitions ?? []) tags.add(new Option(`${d.name} · ${d.type}`, d.id));
+  tags.value = [...tags.options].some(o => o.value === selected) ? selected : '';
+  const selectedTag = value.definitions?.find(d => d.id === tags.value);
+  if (selectedTag && document.activeElement !== $('tag-name')) { $<HTMLInputElement>('tag-name').value = selectedTag.name; $<HTMLSelectElement>('tag-type').value = selectedTag.type; }
+  const reviews = $<HTMLSelectElement>('review-list'), reviewSelected = reviews.value;
+  reviews.replaceChildren(new Option('New comment', ''));
+  annotationValue(value).reviews.forEach((r, i) => reviews.add(new Option(`Line ${view.state.doc.lineAt(Math.min(r.from, view.state.doc.length)).number}: ${r.string.slice(0, 70)}`, String(i))));
+  reviews.value = [...reviews.options].some(o => o.value === reviewSelected) ? reviewSelected : '';
+  if (reviews.value !== '' && document.activeElement !== $('review-text')) $<HTMLTextAreaElement>('review-text').value = annotationValue(value).reviews[Number(reviews.value)]?.string ?? '';
+  for (const control of document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('.annotation-tools button,.annotation-tools input,.annotation-tools select,.annotation-tools textarea')) control.disabled = current?.readOnly ?? true;
+}
+for (const type of tagTypes) $<HTMLSelectElement>('tag-type').add(new Option(type, type));
+function annotationAction(action: () => void) {
+  if (current.readOnly) return;
+  try { action(); $('annotation-status').textContent = 'Updated. Ctrl+Z to undo.'; }
+  catch (error) { $('annotation-status').textContent = (error as Error).message; }
+}
+function selectedAnnotationRange() {
+  const { from, to } = view.state.selection.main;
+  if (from === to) throw new Error('Select screenplay text first.');
+  return { from, to };
+}
+function chosenTag(value: Revisions) {
+  const tag = value.definitions?.find(d => d.id === $<HTMLSelectElement>('tag-list').value);
+  if (!tag) throw new Error('Choose an existing tag.');
+  return tag;
+}
+$('tag-list').addEventListener('change', () => {
+  const d = view.state.field(revisionField).definitions?.find(d => d.id === $<HTMLSelectElement>('tag-list').value);
+  $<HTMLInputElement>('tag-name').value = d?.name ?? ''; $<HTMLSelectElement>('tag-type').value = d?.type ?? 'cast';
+});
+for (const action of ['create', 'apply', 'rename', 'delete', 'clear']) $(`tag-${action}`).addEventListener('click', () => annotationAction(() => {
+  const value = view.state.field(revisionField), annotations = annotationValue(value);
+  let definitions = value.definitions ?? [], tags = annotations.tags, createdId: string | undefined;
+  if (action === 'create') {
+    const { from, to } = selectedAnnotationRange(), name = $<HTMLInputElement>('tag-name').value.trim(), type = $<HTMLSelectElement>('tag-type').value;
+    if (!name) throw new Error('Enter a tag name.');
+    const d = { id: crypto.randomUUID(), name, type }; createdId = d.id; definitions = [...definitions, d]; tags = replaceAnnotation(tags, from, to, { from, to, definition: d.id, type });
+  } else if (action === 'clear') { const { from, to } = selectedAnnotationRange(); tags = replaceAnnotation(tags, from, to); }
+  else {
+    const d = chosenTag(value);
+    if (action === 'apply') { const { from, to } = selectedAnnotationRange(); tags = replaceAnnotation(tags, from, to, { from, to, definition: d.id, type: d.type }); }
+    if (action === 'delete') { definitions = definitions.filter(t => t.id !== d.id); tags = tags.filter(t => t.definition !== d.id); }
+    if (action === 'rename') {
+      const name = $<HTMLInputElement>('tag-name').value.trim(), type = $<HTMLSelectElement>('tag-type').value;
+      if (!name) throw new Error('Enter a tag name.');
+      definitions = definitions.map(t => t.id === d.id ? { ...t, name, type } : t); tags = tags.map(t => t.definition === d.id ? { ...t, type } : t);
+    }
+  }
+  changeRevisions({ ...value, definitions, annotations: { ...annotations, tags } });
+  if (createdId) $<HTMLSelectElement>('tag-list').value = createdId;
+}));
+$('review-list').addEventListener('change', () => {
+  const r = annotationValue(view.state.field(revisionField)).reviews[Number($<HTMLSelectElement>('review-list').value)];
+  $<HTMLTextAreaElement>('review-text').value = $<HTMLSelectElement>('review-list').value === '' ? '' : r?.string ?? '';
+});
+for (const action of ['add', 'update', 'delete', 'go']) $(`review-${action}`).addEventListener('click', () => annotationAction(() => {
+  const value = view.state.field(revisionField), annotations = annotationValue(value), chosen = $<HTMLSelectElement>('review-list').value, index = chosen === '' ? -1 : Number(chosen);
+  let reviews = annotations.reviews;
+  const string = $<HTMLTextAreaElement>('review-text').value;
+  if (action === 'add') { const { from, to } = selectedAnnotationRange(); if (!string.trim()) throw new Error('Enter a comment.'); reviews = replaceAnnotation(reviews, from, to, { from, to, string }); }
+  else {
+    const review = reviews[index]; if (!review) throw new Error('Choose a comment.');
+    if (action === 'go') { if (previewMode) setPreview(false); view.dispatch({ selection: { anchor: review.from, head: review.to }, effects: EditorView.scrollIntoView(review.from, { y: 'center' }) }); view.focus(); return; }
+    if (action === 'delete') reviews = reviews.filter((_r, i) => i !== index);
+    if (action === 'update') { if (!string.trim()) throw new Error('Enter a comment.'); reviews = reviews.map((r, i) => i === index ? { ...r, string } : r); }
+  }
+  changeRevisions({ ...value, annotations: { ...annotations, reviews } });
+}));
+for (const accept of [true, false]) $(accept ? 'revision-accept' : 'revision-reject').addEventListener('click', () => {
+  if (current.readOnly) return;
+  const { from, to } = view.state.selection.main;
+  if (from === to) { $('revision-summary').textContent = 'Select revised text first.'; return; }
+  const result = resolveRevisions(view.state, view.state.field(revisionField), from, to, accept);
+  if (!result.count) { $('revision-summary').textContent = 'The selection contains no revisions.'; return; }
+  view.dispatch({ changes: result.changes, effects: setRevisions.of(result.revisions), annotations: isolateHistory.of('full') }); view.focus();
+});
+
+for (const id of ['print-header', 'print-footer', 'print-revisions', 'print-scenes', 'print-continuations']) $(id).addEventListener('change', () => { if (previewMode) refreshPreview(); });
+
+refreshRevisionControls(view.state.field(revisionField)); refreshAnnotationControls(view.state.field(revisionField));

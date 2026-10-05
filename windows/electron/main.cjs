@@ -40,7 +40,7 @@ function applyUpdate(update) {
   if (update.text.length > 20 * 1024 * 1024) throw new Error('Document exceeds the 20 MB prototype limit.');
   if ((doc.revisions.annotations || doc.revisions.headings) && update.revisions === undefined && update.text !== doc.text) return false;
   const revisions = update.revisions ?? doc.revisions;
-  if (!validateDocumentRevisions(doc.model, update.text, revisions)) return false;
+  if (!validateDocumentRevisions(doc.model, update.text, revisions) || Buffer.byteLength(JSON.stringify(revisions), 'utf8') > 20 * 1024 * 1024) return false;
   const changedRevisions = JSON.stringify(revisions) !== JSON.stringify(doc.revisions);
   if (!doc.model.revisionEditable && (update.text !== doc.model.text || changedRevisions)) return false;
   if (update.revision < doc.revision) return true;
@@ -130,6 +130,7 @@ async function save(saveAs = false) {
   }
   if (path.extname(target).toLowerCase() === '.fdx') throw new Error('Save the script as Fountain; use File > Export Final Draft for FDX.');
   const content = encodeDocument(doc.model, doc.text, doc.revisions);
+  if (Buffer.byteLength(content, 'utf8') > 20 * 1024 * 1024) throw new Error('The encoded screenplay exceeds the 20 MB file limit. No file was written.');
   if (doc.protectedPaths.has(path.resolve(target).toLowerCase())) {
     throw new Error('Save the editable copy under a different filename to preserve the original BEAT document.');
   }
@@ -272,6 +273,7 @@ async function recover() {
   restored.recoveryName = record.name ?? (record.sourcePath ? path.basename(record.sourcePath) : 'Untitled.fountain');
   if (!restored.model.revisionEditable && record.text !== restored.model.text) throw new Error('Recovery text conflicts with protected BEAT metadata. The draft was retained for inspection.');
   const restoredRevisions = record.revisions ?? restored.model.revisions;
+  if (restoredRevisions.definitions === undefined && restored.model.revisions.definitions) restoredRevisions.definitions = restored.model.revisions.definitions;
   if (!validateDocumentRevisions(restored.model, record.text, restoredRevisions) || !restored.model.revisionEditable && JSON.stringify(restoredRevisions) !== JSON.stringify(restored.model.revisions)) throw new Error('Invalid protected revision recovery state. The draft was retained.');
   restored.revisions = restoredRevisions;
   restored.text = record.text; restored.recoverySource = entry.key;
@@ -303,7 +305,7 @@ app.whenReady().then(async () => {
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Screenplay preview', accelerator: 'Ctrl+Shift+P', click: () => command('preview') }, { label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.10.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revision additions and suggested removals are available. Supported native tags and reviews are preserved during editing. Native heading UUIDs are preserved. Tag management and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.11.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revision additions and suggested removals are available. Supported native tags and reviews are preserved during editing. Native heading UUIDs are preserved. Tag and review management, revision decisions and print markers are available. Plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {

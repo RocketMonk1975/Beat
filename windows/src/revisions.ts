@@ -1,16 +1,18 @@
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
 import { invertedEffects } from '@codemirror/commands';
 import { Decoration, EditorView } from '@codemirror/view';
-import { mapAnnotations, validateAnnotations, type Annotations } from './annotations';
+import { mapAnnotations, validateAnnotations, validateDefinitions, type Annotations, type TagDefinition } from './annotations';
 import { mapHeadingIdentities, validateHeadingIdentities, type HeadingIdentity } from './headings';
 
 export interface RevisionRange { from: number; to: number; generation: number; kind: 'Addition' | 'RemovalSuggestion' }
-export interface Revisions { enabled: boolean; generation: number; ranges: RevisionRange[]; annotations?: Annotations; headings?: HeadingIdentity[] }
+export interface Revisions { enabled: boolean; generation: number; ranges: RevisionRange[]; annotations?: Annotations; headings?: HeadingIdentity[]; definitions?: TagDefinition[] }
 export const emptyRevisions = (): Revisions => ({ enabled: false, generation: 0, ranges: [] });
 export function validateRevisions(value: unknown, document: number | string): value is Revisions {
   const length = typeof document === 'number' ? document : document.length;
   const boundary = (position: number) => typeof document === 'number' || !(position > 0 && position < length && /[\uD800-\uDBFF]/.test(document[position - 1]) && /[\uDC00-\uDFFF]/.test(document[position]));
   const v = value as Revisions;
+  if (v && Object.keys(v).some(key => !['enabled', 'generation', 'ranges', 'annotations', 'headings', 'definitions'].includes(key))) return false;
+  if (v?.definitions !== undefined && !validateDefinitions(v.definitions)) return false;
   if (v?.annotations !== undefined && (typeof document !== 'string' || !validateAnnotations(v.annotations, document))) return false;
   if (v?.headings !== undefined && (typeof document !== 'string' || !validateHeadingIdentities(document, v.headings))) return false;
   return !!v && typeof v.enabled === 'boolean' && Number.isInteger(v.generation) && v.generation >= 0 && v.generation < 8 && Array.isArray(v.ranges) && v.ranges.length <= 100000 && v.ranges.every(r => !!r && boundary(r.from) && boundary(r.to) && Number.isInteger(r.from) && Number.isInteger(r.to) && r.from >= 0 && r.to > r.from && r.to <= length && Number.isInteger(r.generation) && r.generation >= 0 && r.generation < 8 && ['Addition', 'RemovalSuggestion'].includes(r.kind)) && v.ranges.every((r, i) => !i || v.ranges[i - 1].to <= r.from);

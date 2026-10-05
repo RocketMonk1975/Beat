@@ -37,10 +37,17 @@ function checkSettings(settings: Record<string, any>) {
     if (Object.hasOwn(scalarSettings, key)) {
       const type = scalarSettings[key];
       if (type === 'boolean' ? ![true, false, 0, 1].includes(value) : typeof value !== type || type === 'number' && !Number.isFinite(value)) throw new Error('Invalid document setting');
-    } else if (['Changed Indices', 'Active Plugins', 'Hidden Revisions'].includes(key)) {
+    } else if (['Changed Indices', 'Active Plugins'].includes(key)) {
       if (!Array.isArray(value) || value.length) throw new Error('Unsupported positional or plugin metadata');
-    } else if (['CharacterData', 'CharacterGenders'].includes(key)) {
-      if (!object(value) || Object.keys(value).length) throw new Error('Unsupported character metadata');
+    } else if (key === 'Hidden Revisions') {
+      if (!Array.isArray(value) || value.some(v => !Number.isInteger(v) || v < 0 || v > 7)) throw new Error('Invalid hidden revisions');
+    } else if (key === 'CharacterGenders') {
+      if (!object(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error('Invalid character genders');
+    } else if (key === 'CharacterData') {
+      if (!object(value)) throw new Error('Invalid character data');
+      for (const character of Object.values(value)) {
+        if (!object(character) || Object.entries(character).some(([field, entry]) => field === 'aliases' ? !Array.isArray(entry) || entry.some(a => typeof a !== 'string') : !['name', 'bio', 'age', 'gender', 'highlightColor', 'realName'].includes(field) || typeof entry !== 'string')) throw new Error('Unsupported character data field');
+      }
     } else if (key === 'Revision Color') { if (value !== '') throw new Error('Unsupported legacy revision color'); }
     else if (key === 'Locked') { if (![false, 0].includes(value)) throw new Error('Locked document'); }
     else throw new Error('Unknown document setting');
@@ -88,6 +95,7 @@ export function decodeDocument(raw: string): FountainDocument {
           if (!object(definition) || Object.keys(definition).some(key => !['id', 'name', 'type'].includes(key)) || typeof definition.id !== 'string' || !definition.id || ids.has(definition.id) || typeof definition.name !== 'string' || !tagTypes.includes(definition.type)) throw new Error('Invalid tag definition');
           ids.set(definition.id, definition.type);
         }
+        if ('TagDefinitions' in settings) revisions.definitions = definitions;
         const readRange = (entry: Record<string, any>) => {
           const r = entry.range;
           if (!Array.isArray(r) || r.length !== 2 || !r.every(Number.isInteger) || r[1] <= 0 || !validBoundary(text, r[0]) || !validBoundary(text, r[0] + r[1]) || text[r[0] - 1] === '\r' && text[r[0]] === '\n' || text[r[0] + r[1] - 1] === '\r' && text[r[0] + r[1]] === '\n') throw new Error('Invalid native annotation range');
@@ -124,7 +132,7 @@ export function validateDocumentRevisions(document: FountainDocument, text: stri
   if (text.includes('\r') || !validateRevisions(revisions, text)) return false;
   if (document.revisions.annotations && !revisions.annotations) return false;
   if (document.revisions.headings && !revisions.headings) return false;
-  const definitions = document.settings?.TagDefinitions as { id: string; type: string }[] | undefined;
+  const definitions = revisions.definitions ?? document.settings?.TagDefinitions as { id: string; type: string }[] | undefined;
   const ids = new Map((definitions ?? []).map(d => [d.id, d.type]));
   return !(revisions.annotations?.tags.some(t => ids.get(t.definition) !== t.type));
 }
@@ -140,6 +148,7 @@ export function encodeDocument(document: FountainDocument, text: string, revisio
   const Revision = { Addition: [] as number[][], RemovalSuggestion: [] as number[][], Removed: [] };
   for (const range of revisions.ranges) Revision[range.kind].push([offset(range.from), offset(range.to) - offset(range.from), range.generation]);
   const settings: Record<string, any> = { ...document.settings, Revision, 'Revision Level': revisions.generation, 'Revision Mode': Number(revisions.enabled) };
+  if (revisions.definitions) settings.TagDefinitions = revisions.definitions;
   if (revisions.headings) settings['Heading UUIDs'] = revisions.headings.map(({ string, uuid }) => ({ string, uuid }));
   if (document.revisions.annotations && !revisions.annotations) throw new Error('Missing native annotation state');
   if (revisions.annotations) {
@@ -151,7 +160,8 @@ export function encodeDocument(document: FountainDocument, text: string, revisio
     if (revisions.annotations.caret !== undefined) settings['Caret Position'] = offset(revisions.annotations.caret);
   }
   if ('Text Length' in settings) settings['Text Length'] = body.length - Number(document.bom);
-  const serialized = JSON.stringify(settings);
+  // Native settings readers search for comment terminators; JSON-escape slashes inside user comments.
+  const serialized = JSON.stringify(settings).replace(/\//g, '\\/');
   return body + (document.settingsFormat === 'modern' ? `/** settings: ${serialized} **/` : `/* If you're seeing this, you can remove the following stuff - BEAT: ${serialized} END_BEAT */`);
 }
 

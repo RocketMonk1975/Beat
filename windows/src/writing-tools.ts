@@ -27,5 +27,5 @@ export function sceneMove(text: string, sceneFrom: number, direction: -1 | 1) {
   const first = text.slice(from, middle), second = text.slice(middle, to);
   // An EOF scene may lack the separator needed when it is moved before another heading.
   const separator = second.endsWith('\n\n') ? '' : second.endsWith('\n') ? '\n' : '\n\n';
-  return { from, to, insert: second + separator + first, expectedText: text.slice(from, to), anchor: direction < 0 ? from : from + second.length + separator.length };
+  return { from, middle, to, separator: separator.length, insert: second + separator + first, expectedText: text.slice(from, to), anchor: direction < 0 ? from : from + second.length + separator.length };
 }

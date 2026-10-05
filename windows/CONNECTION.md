@@ -47,3 +47,5 @@ Codex supports stdio MCP servers through a `[mcp_servers.beat]` entry in its con
 When revision tracking is enabled in the editor, Codex insertions receive the selected revision generation. Undo and redo restore both text and revision ranges. Supported native revision/tag/review documents are editable. Text edits transform all supported annotation ranges, and undo/redo restores them together. Unsupported metadata remains protected.
 
 Supported native heading UUIDs follow guarded text edits and persist through undo/redo, recovery and saves. New headings receive fresh IDs; direct heading renames retain their IDs. Unsupported or mismatched native identity tables remain read-only.
+
+Version 0.11.0 metadata tools share the editor transaction history and monotonic revision guard. Scene moves carry supported annotations and UUIDs together. Revision acceptance/rejection remains a user-controlled selection action; it updates text and metadata atomically.
