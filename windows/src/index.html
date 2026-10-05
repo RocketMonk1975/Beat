@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+  <title>BEAT Windows</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand"><span class="brand-mark">(beat)</span><span class="platform">WINDOWS <b>PREVIEW</b></span></div>
+    <div class="file-actions"><button id="new" title="New · Ctrl+N">New</button><button id="open" title="Open · Ctrl+O">Open</button><button id="save" class="primary" title="Save · Ctrl+S">Save</button></div>
+    <div class="document-name"><span id="filename">Untitled.fountain</span><span id="save-state">Ready</span></div>
+    <div class="view-actions"><button id="find" title="Find / Replace · Ctrl+F">Find</button><button id="focus" title="Focus mode · Ctrl+Shift+F" aria-pressed="false">Focus</button><button id="theme" title="Toggle light / dark theme" aria-label="Toggle theme">Light</button></div>
+  </header>
+  <div id="metadata-banner" role="status" hidden><span>This BEAT document is read-only while revision and tag support is being ported.</span><button id="editable-copy">Create editable copy</button></div>
+  <main class="workspace">
+    <aside class="outline-panel" aria-label="Screenplay outline">
+      <div class="panel-heading"><h1>Outline</h1><span id="scene-count">0 scenes</span></div>
+      <div class="outline-tabs"><span class="active">SCENES & SECTIONS</span></div>
+      <input id="outline-filter" type="search" placeholder="Filter scenes…" aria-label="Filter scenes">
+      <nav id="outline" aria-label="Scenes and sections"></nav>
+      <div class="sidebar-foot"><span class="small-logo">(beat)</span><p>A little space.<br>A world of stories.</p></div>
+    </aside>
+    <section class="writing-workspace" aria-label="Writing workspace">
+      <div class="writing-heading"><span>SCREENPLAY</span><span id="mode-label">Fountain · live formatting</span></div>
+      <div id="editor"></div>
+    </section>
+  </main>
+  <footer class="statusbar"><span><span class="status-dot"></span><span id="file-mode">LOCAL DOCUMENT</span></span><span id="stats">0 words</span><span id="cursor">Line 1 · Action</span><span class="shortcut-hint">Ctrl+S save · Ctrl+F find</span></footer>
+  <script src="renderer.js"></script>
+</body>
+</html>

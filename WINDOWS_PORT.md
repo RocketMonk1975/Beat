@@ -1,6 +1,6 @@
 # BEAT Windows port: initial assessment
 
-Status: source inspected and fork prepared; no Windows executable implemented yet.
+Status: first Windows writing prototype implemented and packaged. Ten parser/document tests and thirteen real Electron desktop checks passed on 2026-10-05.
 Upstream: https://github.com/lmparppei/Beat
 Fork: https://github.com/RocketMonk1975/Beat
 Inspected upstream commit: 7abc3e43818f56f76ab3829a50329f65fd49661c
@@ -14,7 +14,7 @@ Keep the Apple application intact and add a separate Windows application in this
 
 ## Proposed architecture
 
-Use Electron and TypeScript for the initial Windows implementation: a desktop host for file dialogs, file I/O and printing; a renderer for the editor and outline; a UI-independent TypeScript document/parser layer. This is a proposal, not an implemented or benchmarked decision. Electron has a larger runtime footprint than the current native app. Keep parsing and pagination separate from UI so a native host remains possible later.
+The initial Windows implementation uses Electron and TypeScript: a desktop host for file dialogs and file I/O; a CodeMirror renderer for the editor and outline; and a UI-independent TypeScript document/parser layer. Printing is still pending. Electron has a larger runtime footprint than the current native app. Parsing and document handling remain separate from UI so a native host remains possible later.
 
 Use context isolation, disable Node access in the renderer, and expose narrowly scoped IPC operations. Plugin support must be designed separately; do not execute upstream plugins in a privileged renderer.
 
@@ -45,4 +45,8 @@ Cover forced element types, character cues, dialogue, parentheticals, transition
 
 ## Initial verification
 
-Repository cloned successfully. GitHub CLI authenticated as RocketMonk1975; fork creation returned its URL. Node/npm are present. dotnet is present but reports no installed SDKs. Original Xcode builds were not attempted on Windows. No Windows UI, parser port or packaging tests have run.
+The application is in windows/. Its portable executable is generated under windows/release/BEAT Windows-win32-x64/. Ten parser/document tests passed, including exact file round-trips, both metadata formats, Unicode positions, and upstream samples. Thirteen real Electron desktop checks passed, including typing, formatting, outline navigation/filtering, save, cancel flows, undo/redo, cross-document history, external-file conflicts, protected metadata, editable copies, invalid UTF-8, and opening Big Fish with 192 scene headings. TypeScript and JavaScript syntax checks passed. npm audit reported zero vulnerabilities at verification time.
+
+The desktop checks ran from the user's normal PowerShell session because the Codex process sandbox prevented Electron's child sandbox from accessing the runtime. No sandbox protections were disabled. The executable was packaged and its application archive checked for required runtime files; clean-machine installation remains unverified.
+
+Existing files with legacy or modern BEAT metadata are deliberately read-only. The explicit editable-copy action creates a new Fountain-only document and prevents overwriting known source metadata files. Range-based revision/tag editing, production pagination, PDF/FDX output, and plugins remain future work. The parser has not yet been validated against native macOS parser output.
