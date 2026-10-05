@@ -135,7 +135,7 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
 
     await openFile(path.resolve('../Sample files/Big-Fish.fountain'));
     await waitFor("document.querySelectorAll('.outline-item.scene').length > 100", 'real script');
-    assert.ok(snapshot().readOnly);
+    assert.equal(snapshot().readOnly,false);
     check('upstream Big Fish sample opens with over 100 navigable scenes');
 
     const automationFile = path.join(root, 'automation.fountain');
@@ -410,8 +410,48 @@ module.exports = async function ({ app, win, dialog, snapshot, runAction, openFi
     assert.equal(snapshot().readOnly,false);assert.deepEqual(snapshot().revisions,metadataDraft.revisions);
     await fs.writeFile(path.join(root,'desktop-native-metadata.png'),(await win.capturePage()).toPNG());
     check('native metadata saves preserve tag definitions, review comments, settings, BOM and CRLF and reopen editable');
+    answer=1;await runAction('new');
+    const uuidFile=path.join(root,'scene-uuids.fountain'), uuidOne='11111111-1111-4111-8111-111111111111',uuidTwo='22222222-2222-4222-8222-222222222222';
+    const uuidText='INT. SAME - DAY\n\n!First.\n\nINT. SAME - DAY\n\n!Second.\n';
+    const uuidRaw='\uFEFF'+uuidText.replaceAll('\n','\r\n')+'/** settings: '+JSON.stringify({'Heading UUIDs':[{string:'INT. SAME - DAY',uuid:uuidOne},{string:'INT. SAME - DAY',uuid:uuidTwo}]})+' **/';
+    await fs.writeFile(uuidFile,uuidRaw);await openFile(uuidFile);
+    await waitFor("document.getElementById('filename').textContent==='scene-uuids.fountain'",'native heading identities loaded');
+    assert.equal(snapshot().readOnly,false);
+    await remote('edit',{...guard(),edits:[{from:0,to:snapshot().revisions.headings[0].to,expectedText:'INT. SAME - DAY',insert:'EXT. RENAMED - NIGHT'}]});
+    assert.equal(snapshot().revisions.headings[0].uuid,uuidOne);
+    await remote('edit',{...guard(),edits:[{from:0,to:0,expectedText:'',insert:'INT. SAME - DAY\n\n!New.\n\n'}]});
+    const uuidNew=snapshot().revisions.headings[0].uuid;assert.notEqual(uuidNew,uuidOne);assert.notEqual(uuidNew,uuidTwo);
+    assert.deepEqual(snapshot().revisions.headings.slice(1).map(h=>h.uuid),[uuidOne,uuidTwo]);
+    await remote('undo',guard());assert.deepEqual(snapshot().revisions.headings.map(h=>h.uuid),[uuidOne,uuidTwo]);
+    await remote('redo',guard());assert.equal(snapshot().revisions.headings[0].uuid,uuidNew);
+    const deletedFrom=snapshot().revisions.headings[1].from,deletedTo=snapshot().revisions.headings[2].from;
+    await remote('edit',{...guard(),edits:[{from:deletedFrom,to:deletedTo,expectedText:snapshot().text.slice(deletedFrom,deletedTo),insert:''}]});
+    assert.deepEqual(snapshot().revisions.headings.map(h=>h.uuid),[uuidNew,uuidTwo]);
+    await remote('undo',guard());assert.deepEqual(snapshot().revisions.headings.map(h=>h.uuid),[uuidNew,uuidOne,uuidTwo]);
+    check('scene UUIDs survive renames and duplicate headings; insertion/deletion undo and redo restore exact identities');
+    const uuidDraft={id:randomUUID(),filePath:uuidFile,model:{original:uuidRaw},text:snapshot().text,revisions:snapshot().revisions,dirty:true,protectedPaths:new Set()};
+    crashed.schedule(uuidDraft);await crashed.flush();answer=1;await runAction('new');answer=0;assert.equal(await runAction('recover'),true);
+    await waitFor("document.getElementById('filename').textContent.includes('Recovered')",'scene identity recovery');
+    assert.deepEqual(snapshot().revisions,uuidDraft.revisions);assert.equal(snapshot().dirty,true);
+    nextSave=uuidFile;assert.equal(await runAction('save'),false);assert.match(errors.pop(),/different filename/);
+    nextSave=path.join(root,'scene-uuids-recovered.fountain');assert.equal(await runAction('save'),true);
+    const savedUuidModel=require('../dist/document.cjs').decodeDocument(await fs.readFile(nextSave,'utf8'));
+    assert.equal(savedUuidModel.bom,true);assert.equal(savedUuidModel.lineEnding,'\r\n');assert.deepEqual(savedUuidModel.revisions,uuidDraft.revisions);
+    answer=1;await runAction('new');await openFile(nextSave);await waitFor("document.getElementById('filename').textContent==='scene-uuids-recovered.fountain'",'saved UUID document reopened');
+    assert.deepEqual(snapshot().revisions,uuidDraft.revisions);assert.equal(await fs.readFile(uuidFile,'utf8'),uuidRaw);
+    check('scene UUID recovery protects the original and preserves identities through BOM/CRLF save and reopen');
+    const bigFishFile=path.resolve('../Sample files/Big-Fish.fountain'),bigFishOriginal=await fs.readFile(bigFishFile,'utf8');
+    await openFile(bigFishFile);await waitFor("document.querySelectorAll('.outline-item.scene').length>100",'editable Big Fish loaded');
+    assert.equal(snapshot().readOnly,false);const fishIDs=snapshot().revisions.headings.map(h=>h.uuid);assert.equal(fishIDs.length,194);
+    await remote('edit',{...guard(),edits:[{from:0,to:0,expectedText:'',insert:'!Windows UUID check.\n\n'}]});
+    assert.deepEqual(snapshot().revisions.headings.map(h=>h.uuid),fishIDs);
+    nextSave=path.join(root,'big-fish-uuid-copy.fountain');assert.equal(await runAction('save-as'),true);
+    const savedFish=require('../dist/document.cjs').decodeDocument(await fs.readFile(nextSave,'utf8'));
+    assert.deepEqual(savedFish.revisions.headings.map(h=>h.uuid),fishIDs);assert.equal(await fs.readFile(bigFishFile,'utf8'),bigFishOriginal);
+    await fs.writeFile(path.join(root,'desktop-scene-uuids.png'),(await win.capturePage()).toPNG());
+    check('Big Fish edits and saves as a separate copy with all 194 native heading UUIDs preserved');
     assert.deepEqual(errors, []);
-    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.9.0', passed: checks.length, checks, errors }, null, 2));
+    await fs.writeFile(path.join(root, 'results.json'), JSON.stringify({ version: '0.10.0', passed: checks.length, checks, errors }, null, 2));
     console.log(`DESKTOP TESTS PASSED: ${checks.length}`);
     await setConnection(false); app.exit(0);
   } catch (error) {

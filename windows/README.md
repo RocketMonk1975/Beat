@@ -1,6 +1,6 @@
 # BEAT Windows preview
 
-Version 0.9.0 enables safe text editing in supported native BEAT documents containing tags, reviews and settings. Revision tracking, Final Draft exchange and PDF export are included. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+Version 0.10.0 preserves native heading UUIDs, allowing supported scripts such as Big Fish to open for editing. Revision tracking, Final Draft exchange and PDF export are included. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
 
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
@@ -35,7 +35,7 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Tag/review creation and management, scene UUID migration and plugin compatibility are not implemented. Revision tracking is limited to additions and suggested removals. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Tag/review creation and management, plugin compatibility are not implemented. Revision tracking is limited to additions and suggested removals. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -94,7 +94,7 @@ Enable **Track additions** above the editor and choose one of the eight native r
 
 Text edits, marks, generation and tracking-mode changes share undo/redo. Revisions persist in automatic recovery and in Fountain saves using BEAT's native UTF-16 revision arrays. BOM and source newline style are preserved; native CRLF range offsets are translated to and from the editor's LF offsets. Untouched files still save byte-for-byte.
 
-The 0.8.0 implementation handled plain Fountain and revision-only legacy BEAT settings. Version 0.9.0 extends editing to supported tags, reviews and known settings in both native envelopes; see below. Nonempty heading UUIDs, plugin data, unknown settings, malformed ranges and obsolete removed ranges stay protected. Create an editable copy to omit those settings. Scene moves are disabled while tracking is enabled or marks are present. PDF/preview show screenplay content without revision marks; FDX export warns that revision metadata is omitted. Native macOS rendering parity has not yet been verified.
+The 0.8.0 implementation handled plain Fountain and revision-only legacy BEAT settings. Version 0.9.0 extends editing to supported tags, reviews and known settings in both native envelopes; see below. Plugin data, unknown settings, malformed ranges and obsolete removed ranges stay protected. Heading UUID support was added in 0.10.0. Create an editable copy to omit those settings. Scene moves are disabled while tracking is enabled or marks are present. PDF/preview show screenplay content without revision marks; FDX export warns that revision metadata is omitted. Native macOS rendering parity has not yet been verified.
 
 ### Native BEAT metadata editing (0.9.0)
 
@@ -102,4 +102,10 @@ Supported legacy `END_BEAT` and modern `/** settings: ... **/` documents now all
 
 Insertions before a range shift it. Insertions inside a range inherit its annotation; insertions at its edges stay outside. Deleting all annotated text removes that range while retaining its tag definition. Undo/redo restores the text and annotations together, including Codex edits. Saved caret positions follow edits and are restored when opening. Automatic recovery retains annotations and restores an unsaved copy protected from overwriting its source. Saves retain BOM, source newline style, native UTF-16 offsets and the original settings envelope. Untouched files remain byte-for-byte identical.
 
-Only recognized scalar settings and validated native annotation structures are editable. Unknown keys, malformed or overlapping ranges, missing tag definitions, locked documents, nonempty scene UUIDs, changed indices, character data, hidden revisions or plugin lists remain protected. The upstream Big Fish sample remains protected because it contains scene UUIDs. Scene moves are disabled for documents carrying native annotation state, even when the current tag/review ranges are empty. Preview/PDF omit tags and review comments; FDX export warns that BEAT metadata is omitted. Native macOS interoperability remains an external verification step.
+Only recognized scalar settings and validated native annotation structures are editable. Unknown keys, malformed or overlapping ranges, missing tag definitions, locked documents, invalid or mismatched scene UUIDs, changed indices, character data, hidden revisions or plugin lists remain protected. The upstream Big Fish sample is editable from 0.10.0. Scene moves are disabled for documents carrying native annotation state, even when the current tag/review ranges are empty. Preview/PDF omit tags and review comments; FDX export warns that BEAT metadata is omitted. Native macOS interoperability remains an external verification step.
+
+### Native heading identities (0.10.0)
+
+Valid native `Heading UUIDs` tables now remain attached to their scene and section lines through text edits. The saved table follows native outline order and retains raw heading strings, including explicit numbers and markup. Duplicate heading names retain their separate UUIDs. Renaming a heading keeps its identity; new headings get fresh UUIDs; deleting a heading removes its saved identity. Undo/redo and recovery restore the exact identities, including IDs generated for newly inserted headings.
+
+Both native settings envelopes are supported, with BOM and newline style preserved. Untouched saves remain byte-for-byte identical. Big Fish's 194 native heading IDs match the Windows outline and now open editable. Malformed, duplicate, incomplete or mismatched UUID tables remain protected. Replacing an entire scene/document creates new identities for replaced headings; a direct single-line rename retains its ID. Scene moves remain disabled for documents carrying heading identities until a dedicated move operation can preserve all metadata together. macOS round-trip interoperability remains an external verification step.

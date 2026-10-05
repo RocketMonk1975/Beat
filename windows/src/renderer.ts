@@ -166,7 +166,7 @@ function renderOutline() {
 }
 function moveCurrentScene(direction: -1 | 1) {
   hideCompletion();
-  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).annotations || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
+  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).annotations || view.state.field(revisionField).headings || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
   const text = view.state.doc.toString(), active = [...parsed.outline].reverse().find(item => item.from <= view.state.selection.main.head);
   if (active?.type !== 'scene') return;
   try {
@@ -184,7 +184,7 @@ function updateCursor() {
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
   const activeIndex = parsed.outline.indexOf(active!);
   for (const [id, direction] of [['scene-up', -1], ['scene-down', 1]] as const) {
-    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).annotations || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
+    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).annotations || !!view.state.field(revisionField).headings || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
   }
   if (!loading) showCompletion();
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));

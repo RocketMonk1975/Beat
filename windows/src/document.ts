@@ -1,5 +1,6 @@
 import { emptyRevisions, validateRevisions, type Revisions } from './revisions';
 import { tagTypes, validBoundary, validateAnnotations, type Annotations } from './annotations';
+import { loadHeadingIdentities } from './headings';
 export { validateRevisions } from './revisions';
 export interface FountainDocument {
   text: string;
@@ -28,7 +29,7 @@ const scalarSettings: Record<string, 'number' | 'string' | 'boolean'> = {
   headerString: 'string', headerAlignment: 'number', Stylesheet: 'string', firstPageNumber: 'number', pageNumberingMode: 'number',
   novelLineHeightMultiplier: 'number', novelContentAlignment: 'number', 'Text Length': 'number'
 };
-const rangeSettings = ['Revision', 'Revision Level', 'Revision Mode', 'Tags', 'TagDefinitions', 'Review Ranges', 'Caret Position'];
+const rangeSettings = ['Revision', 'Revision Level', 'Revision Mode', 'Tags', 'TagDefinitions', 'Review Ranges', 'Caret Position', 'Heading UUIDs'];
 function object(value: unknown): value is Record<string, any> { return !!value && typeof value === 'object' && !Array.isArray(value); }
 function checkSettings(settings: Record<string, any>) {
   for (const [key, value] of Object.entries(settings)) {
@@ -36,7 +37,7 @@ function checkSettings(settings: Record<string, any>) {
     if (Object.hasOwn(scalarSettings, key)) {
       const type = scalarSettings[key];
       if (type === 'boolean' ? ![true, false, 0, 1].includes(value) : typeof value !== type || type === 'number' && !Number.isFinite(value)) throw new Error('Invalid document setting');
-    } else if (['Heading UUIDs', 'Changed Indices', 'Active Plugins', 'Hidden Revisions'].includes(key)) {
+    } else if (['Changed Indices', 'Active Plugins', 'Hidden Revisions'].includes(key)) {
       if (!Array.isArray(value) || value.length) throw new Error('Unsupported positional or plugin metadata');
     } else if (['CharacterData', 'CharacterGenders'].includes(key)) {
       if (!object(value) || Object.keys(value).length) throw new Error('Unsupported character metadata');
@@ -79,6 +80,7 @@ export function decodeDocument(raw: string): FountainDocument {
       const mode = Object.hasOwn(settings, 'Revision Mode') ? settings['Revision Mode'] : false;
       if (![false, true, 0, 1].includes(mode)) throw new Error('Invalid revision mode');
       revisions = { enabled: Boolean(mode), generation: Object.hasOwn(settings, 'Revision Level') ? settings['Revision Level'] : 0, ranges };
+      if ('Heading UUIDs' in settings) revisions.headings = loadHeadingIdentities(normalized, settings['Heading UUIDs']);
       if (['Tags', 'TagDefinitions', 'Review Ranges', 'Caret Position'].some(key => key in settings!)) {
         const definitions = Object.hasOwn(settings, 'TagDefinitions') ? settings.TagDefinitions : [], ids = new Map<string, string>();
         if (!Array.isArray(definitions) || definitions.length > 100000) throw new Error('Invalid tag definitions');
@@ -121,6 +123,7 @@ export function decodeDocument(raw: string): FountainDocument {
 export function validateDocumentRevisions(document: FountainDocument, text: string, revisions: unknown): revisions is Revisions {
   if (text.includes('\r') || !validateRevisions(revisions, text)) return false;
   if (document.revisions.annotations && !revisions.annotations) return false;
+  if (document.revisions.headings && !revisions.headings) return false;
   const definitions = document.settings?.TagDefinitions as { id: string; type: string }[] | undefined;
   const ids = new Map((definitions ?? []).map(d => [d.id, d.type]));
   return !(revisions.annotations?.tags.some(t => ids.get(t.definition) !== t.type));
@@ -137,6 +140,7 @@ export function encodeDocument(document: FountainDocument, text: string, revisio
   const Revision = { Addition: [] as number[][], RemovalSuggestion: [] as number[][], Removed: [] };
   for (const range of revisions.ranges) Revision[range.kind].push([offset(range.from), offset(range.to) - offset(range.from), range.generation]);
   const settings: Record<string, any> = { ...document.settings, Revision, 'Revision Level': revisions.generation, 'Revision Mode': Number(revisions.enabled) };
+  if (revisions.headings) settings['Heading UUIDs'] = revisions.headings.map(({ string, uuid }) => ({ string, uuid }));
   if (document.revisions.annotations && !revisions.annotations) throw new Error('Missing native annotation state');
   if (revisions.annotations) {
     const ids = new Map((settings.TagDefinitions ?? []).map((d: any) => [d.id, d.type]));

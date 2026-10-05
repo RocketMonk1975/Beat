@@ -45,3 +45,5 @@ For another installation or the ZIP's internal launcher, set BEAT_CONNECTION_FIL
 Codex supports stdio MCP servers through a `[mcp_servers.beat]` entry in its config.toml. See the [official MCP setup documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli). This adapter needs Node.js and the installed source dependencies; the portable BEAT executable itself requires no Node installation.
 
 When revision tracking is enabled in the editor, Codex insertions receive the selected revision generation. Undo and redo restore both text and revision ranges. Supported native revision/tag/review documents are editable. Text edits transform all supported annotation ranges, and undo/redo restores them together. Unsupported metadata remains protected.
+
+Supported native heading UUIDs follow guarded text edits and persist through undo/redo, recovery and saves. New headings receive fresh IDs; direct heading renames retain their IDs. Unsupported or mismatched native identity tables remain read-only.
