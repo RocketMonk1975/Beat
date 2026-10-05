@@ -32,7 +32,7 @@ let focusMode = false;
 let previewMode = false;
 const paperSize = () => $<HTMLSelectElement>('paper-size').value as PaperSize;
 function refreshPreview() {
-  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier${view.state.field(revisionField).ranges.length ? " · Revision marks omitted from preview/PDF" : ""}`; }
+  try { const layout = renderPreview(parsed, $('preview-content'), paperSize()); $('preview-summary').textContent = `${layout.pages.length} pages · ${layout.size} · 12 pt Courier${view.state.field(revisionField).annotations ? " · Tags/reviews omitted" : ""}${view.state.field(revisionField).ranges.length ? " · Revision marks omitted from preview/PDF" : ""}`; }
   catch (error) { $('preview-content').replaceChildren(); $('preview-summary').textContent = `Preview unavailable: ${(error as Error).message}`; }
 }
 let outlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -108,7 +108,7 @@ function applyDocument(doc: DocumentState) {
   if (current) hideCompletion();
   current = doc; editorRevision = doc.revision; loading = true;
   // A fresh state resets undo history so edits cannot cross document boundaries.
-  const state = EditorState.create({ doc: doc.text, extensions: [
+  const state = EditorState.create({ doc: doc.text, selection: { anchor: doc.revisions.annotations?.caret ?? 0 }, extensions: [
     history(), revisionExtensions(doc.revisions), drawSelection(), highlightActiveLine(), search({ top: true }), EditorView.lineWrapping,
     readOnly.of([EditorState.readOnly.of(doc.readOnly), EditorView.editable.of(!doc.readOnly)]),
     EditorView.contentAttributes.of({ 'aria-label': 'Screenplay editor', 'aria-autocomplete': 'list', 'aria-controls': 'character-suggestions', spellcheck: 'true' }),
@@ -166,7 +166,7 @@ function renderOutline() {
 }
 function moveCurrentScene(direction: -1 | 1) {
   hideCompletion();
-  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
+  if (current.readOnly || view.state.field(revisionField).enabled || view.state.field(revisionField).annotations || view.state.field(revisionField).ranges.length || $<HTMLInputElement>('outline-filter').value.trim()) return;
   const text = view.state.doc.toString(), active = [...parsed.outline].reverse().find(item => item.from <= view.state.selection.main.head);
   if (active?.type !== 'scene') return;
   try {
@@ -184,7 +184,7 @@ function updateCursor() {
   const active = [...parsed.outline].reverse().find(item => item.from <= position);
   const activeIndex = parsed.outline.indexOf(active!);
   for (const [id, direction] of [['scene-up', -1], ['scene-down', 1]] as const) {
-    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
+    $<HTMLButtonElement>(id).disabled = !current || current.readOnly || view.state.field(revisionField).enabled || !!view.state.field(revisionField).annotations || !!view.state.field(revisionField).ranges.length || !!$<HTMLInputElement>('outline-filter').value.trim() || active?.type !== 'scene' || parsed.outline[activeIndex + direction]?.type !== 'scene';
   }
   if (!loading) showCompletion();
   for (const button of $('outline').querySelectorAll<HTMLElement>('button')) button.classList.toggle('current', button.dataset.from === String(active?.from));
@@ -274,7 +274,7 @@ function refreshRevisionControls(value: Revisions) {
   $<HTMLInputElement>('revision-track').checked = value.enabled;
   $<HTMLSelectElement>('revision-generation').value = String(value.generation);
   for (const id of ['revision-track', 'revision-generation', 'revision-add', 'revision-remove', 'revision-clear']) ($<HTMLButtonElement>(id)).disabled = current?.readOnly ?? true;
-  $('revision-summary').textContent = `${value.ranges.length} revision ranges · deletions erase text; mark suggested removals before deleting`;
+  $('revision-summary').textContent = `${value.ranges.length} revision ranges${value.annotations ? ` · ${value.annotations.tags.length} tags · ${value.annotations.reviews.length} reviews preserved` : ""} · deletions erase text; mark suggested removals before deleting`;
 }
 function changeRevisions(value: Revisions) {
   if (current.readOnly) return;

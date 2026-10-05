@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { decodeDocument, encodeDocument, validateRevisions } = require('../dist/document.cjs');
+const { decodeDocument, encodeDocument, validateDocumentRevisions } = require('../dist/document.cjs');
 const { createProtection, atomicWrite } = require('./protection.cjs');
 const { importFDX, exportFDX } = require('../dist/fdx.cjs');
 const { printHTML } = require('../dist/pagination.cjs');
@@ -38,8 +38,9 @@ function applyUpdate(update) {
   if (update?.id !== doc.id || typeof update.text !== 'string') return false;
   if (!Number.isInteger(update.revision) || update.revision < 0) return false;
   if (update.text.length > 20 * 1024 * 1024) throw new Error('Document exceeds the 20 MB prototype limit.');
+  if (doc.revisions.annotations && update.revisions === undefined && update.text !== doc.text) return false;
   const revisions = update.revisions ?? doc.revisions;
-  if (!validateRevisions(revisions, update.text)) return false;
+  if (!validateDocumentRevisions(doc.model, update.text, revisions)) return false;
   const changedRevisions = JSON.stringify(revisions) !== JSON.stringify(doc.revisions);
   if (!doc.model.revisionEditable && (update.text !== doc.model.text || changedRevisions)) return false;
   if (update.revision < doc.revision) return true;
@@ -271,7 +272,7 @@ async function recover() {
   restored.recoveryName = record.name ?? (record.sourcePath ? path.basename(record.sourcePath) : 'Untitled.fountain');
   if (!restored.model.revisionEditable && record.text !== restored.model.text) throw new Error('Recovery text conflicts with protected BEAT metadata. The draft was retained for inspection.');
   const restoredRevisions = record.revisions ?? restored.model.revisions;
-  if (!validateRevisions(restoredRevisions, record.text) || !restored.model.revisionEditable && JSON.stringify(restoredRevisions) !== JSON.stringify(restored.model.revisions)) throw new Error('Invalid protected revision recovery state. The draft was retained.');
+  if (!validateDocumentRevisions(restored.model, record.text, restoredRevisions) || !restored.model.revisionEditable && JSON.stringify(restoredRevisions) !== JSON.stringify(restored.model.revisions)) throw new Error('Invalid protected revision recovery state. The draft was retained.');
   restored.revisions = restoredRevisions;
   restored.text = record.text; restored.recoverySource = entry.key;
   restored.protectedPaths = new Set([...record.protectedPaths, ...(record.sourcePath ? [path.resolve(record.sourcePath).toLowerCase()] : [])]);
@@ -302,7 +303,7 @@ app.whenReady().then(async () => {
     { label: 'Edit', submenu: [{ label: 'Undo', accelerator: 'Ctrl+Z', click: () => command('undo') }, { label: 'Redo', accelerator: 'Ctrl+Shift+Z', click: () => command('redo') }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { label: 'Select All', accelerator: 'Ctrl+A', click: () => command('select-all') }, { type: 'separator' }, { label: 'Find / Replace', accelerator: 'Ctrl+F', click: () => command('find') }] },
     { label: 'View', submenu: [{ label: 'Screenplay preview', accelerator: 'Ctrl+Shift+P', click: () => command('preview') }, { label: 'Focus mode', accelerator: 'Ctrl+Shift+F', click: () => command('focus') }, { label: 'Toggle theme', accelerator: 'Ctrl+Shift+D', click: () => command('theme') }, { role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Connection', submenu: [{ label: 'Toggle local Codex connection', click: () => setConnection(!bridge) }, { label: 'Connection details', click: () => dialog.showMessageBox(win, { title: 'Local Codex connection', message: bridge ? 'Local connection is ready.' : 'Local connection is paused.', detail: `Connection file: ${connectionFile}\n\nCodex edits use the editor undo history. Your script stays unsaved until you save it. ${connectionError}` }) }] },
-    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.8.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revision additions and suggested removals are available. Tags and plugins are not implemented yet.' }) }] }
+    { label: 'Help', submenu: [{ label: 'About BEAT Windows', click: () => dialog.showMessageBox(win, { title: 'BEAT Windows', message: 'BEAT Windows · Preview 0.9.0', detail: 'A Windows port in development, based on BEAT by Lauri-Matti Parppei and contributors. GPL v3 or later. Fountain editing, outlining and a local Codex connection are available. Paginated preview and PDF export are available. FDX import/export is available for screenplay content. Revision additions and suggested removals are available. Supported native tags and reviews are preserved during editing. Tag management and plugins are not implemented yet.' }) }] }
   ]));
   ipcMain.handle('document:current', event => { trusted(event); return snapshot(); });
   ipcMain.handle('document:update', (event, update) => {

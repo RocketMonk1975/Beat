@@ -1,6 +1,6 @@
 # BEAT Windows preview
 
-Version 0.8.0 adds revision tracking, following Final Draft exchange in 0.7.0, writing tools in 0.6.0 and paginated PDF export in 0.5.0. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
+Version 0.9.0 enables safe text editing in supported native BEAT documents containing tags, reviews and settings. Revision tracking, Final Draft exchange and PDF export are included. See [CONNECTION.md](CONNECTION.md) for tools, discovery and registration.
 
 This is the first runnable Windows prototype in a fork of [BEAT](https://github.com/lmparppei/Beat), created by Lauri-Matti Parppei and contributors. The original macOS/iOS app remains in the parent repository. This port is licensed under GPL v3 or later; see ../LICENSE.md.
 
@@ -31,11 +31,11 @@ Alternatively, run `& .\scripts\test-desktop.ps1` from PowerShell to run the des
 - Undo/redo, find/replace, dark/light themes and focus mode.
 - Local Codex control: read, search, navigate, apply undoable edits, undo/redo and save a named script. Pause the connection from the footer.
 - Unsaved-change prompts and detection of externally changed files before overwriting.
-- Revision-only BEAT documents using the supported legacy settings envelope are editable. Other BEAT metadata documents open read-only and round-trip intact. File > Create editable copy creates a new Fountain-only document; the copy omits BEAT metadata and must be saved under another filename.
+- Supported legacy and modern BEAT documents containing revisions, tags, review comments and known settings are editable. Unsupported metadata documents open read-only and round-trip intact. File > Create editable copy creates a new Fountain-only document; the copy omits BEAT metadata and must be saved under another filename.
 
 ## Current limits
 
-This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Tags and plugin compatibility are not implemented. Revision tracking is limited to additions and suggested removals. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
+This is a writing prototype, not a feature-complete replacement for macOS BEAT. The parser implements a basic subset and has not been compared against output from the native BEAT parser. Source markup stays visible while writing. Tag/review creation and management, scene UUID migration and plugin compatibility are not implemented. Revision tracking is limited to additions and suggested removals. Screenplay formatting in the editor is a writing aid, not production pagination. Documents are limited to 20 MB. Save regularly.
 
 ## Shortcuts
 
@@ -68,7 +68,7 @@ Preview uses physical Letter (default) or A4 pages, 12-point Courier New, one-in
 
 Choose paper size in Preview. File > Export PDF (Ctrl+Alt+P), or Preview's Export PDF button, uses that same measured layout. Export does not save the script or clear its recovery draft. Cancellation, storage errors and changes during export leave the screenplay untouched. Existing PDF destinations are checked before atomic replacement. The exporter runs in an isolated sandboxed window with JavaScript disabled.
 
-This is the first pagination implementation, not verified production parity with native macOS BEAT. Font fallback for non-Latin text depends on installed Windows fonts. Very long character cues use at most two rows in repeated continuation headers. Native revision marks, scene continuation numbering, customized print styles, headers/footers and FDX export remain future work. Inspect the PDF before production use.
+This is the first pagination implementation, not verified production parity with native macOS BEAT. Font fallback for non-Latin text depends on installed Windows fonts. Very long character cues use at most two rows in repeated continuation headers. Native revision marks, scene continuation numbering, customized print styles, headers/footers remain future work. Inspect the PDF before production use.
 
 
 ### Writing tools (0.6.0)
@@ -94,4 +94,12 @@ Enable **Track additions** above the editor and choose one of the eight native r
 
 Text edits, marks, generation and tracking-mode changes share undo/redo. Revisions persist in automatic recovery and in Fountain saves using BEAT's native UTF-16 revision arrays. BOM and source newline style are preserved; native CRLF range offsets are translated to and from the editor's LF offsets. Untouched files still save byte-for-byte.
 
-This first implementation edits only plain Fountain and supported revision-only legacy BEAT settings. Documents containing tags, reviews, heading UUIDs, plugin data, unknown settings, malformed ranges or obsolete removed ranges stay protected. Modern settings envelopes are also protected. Create an editable copy to omit those settings. Scene moves are disabled while tracking is enabled or marks are present. PDF/preview show screenplay content without revision marks; FDX export warns that revision metadata is omitted. Native macOS rendering parity has not yet been verified.
+The 0.8.0 implementation handled plain Fountain and revision-only legacy BEAT settings. Version 0.9.0 extends editing to supported tags, reviews and known settings in both native envelopes; see below. Nonempty heading UUIDs, plugin data, unknown settings, malformed ranges and obsolete removed ranges stay protected. Create an editable copy to omit those settings. Scene moves are disabled while tracking is enabled or marks are present. PDF/preview show screenplay content without revision marks; FDX export warns that revision metadata is omitted. Native macOS rendering parity has not yet been verified.
+
+### Native BEAT metadata editing (0.9.0)
+
+Supported legacy `END_BEAT` and modern `/** settings: ... **/` documents now allow screenplay text editing while preserving existing tag definitions, tag ranges, review comments, revisions and known document settings. Tags have a teal tint; reviews have a gold tint with the comment available on hover. Their counts appear above the editor. Tag and review management tools are not included in this release.
+
+Insertions before a range shift it. Insertions inside a range inherit its annotation; insertions at its edges stay outside. Deleting all annotated text removes that range while retaining its tag definition. Undo/redo restores the text and annotations together, including Codex edits. Saved caret positions follow edits and are restored when opening. Automatic recovery retains annotations and restores an unsaved copy protected from overwriting its source. Saves retain BOM, source newline style, native UTF-16 offsets and the original settings envelope. Untouched files remain byte-for-byte identical.
+
+Only recognized scalar settings and validated native annotation structures are editable. Unknown keys, malformed or overlapping ranges, missing tag definitions, locked documents, nonempty scene UUIDs, changed indices, character data, hidden revisions or plugin lists remain protected. The upstream Big Fish sample remains protected because it contains scene UUIDs. Scene moves are disabled for documents carrying native annotation state, even when the current tag/review ranges are empty. Preview/PDF omit tags and review comments; FDX export warns that BEAT metadata is omitted. Native macOS interoperability remains an external verification step.

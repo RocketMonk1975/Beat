@@ -136,3 +136,6 @@ button:disabled { opacity:.4; cursor:default; }
 .revision-Addition { text-decoration: underline; text-decoration-thickness:2px; text-decoration-color:var(--revision-color); }
 .revision-RemovalSuggestion { text-decoration:line-through; text-decoration-color:var(--revision-color); background:color-mix(in srgb, var(--revision-color) 15%, transparent); }
 .revision-generation-0 { --revision-color:#5b9dff; }.revision-generation-1 { --revision-color:#f083c6; }.revision-generation-2 { --revision-color:#c7a800; }.revision-generation-3 { --revision-color:#39b878; }.revision-generation-4 { --revision-color:#d69f30; }.revision-generation-5 { --revision-color:#b89b76; }.revision-generation-6 { --revision-color:#df7890; }.revision-generation-7 { --revision-color:#d8475f; }
+
+.native-tag { background:color-mix(in srgb, #55b5a8 15%, transparent); border-bottom:1px dotted #55b5a8; }
+.native-review { background:color-mix(in srgb, #cfae54 18%, transparent); border-bottom:1px dotted #cfae54; }
